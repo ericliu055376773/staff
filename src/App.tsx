@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Search,
   ChevronLeft,
   ChevronRight,
-  MoreVertical,
   Home,
-  Heart,
   User,
   Calendar as CalendarIcon,
+  CalendarCheck,
   Plus,
   Users,
   Briefcase,
@@ -15,16 +14,15 @@ import {
   ShieldCheck,
   RefreshCw,
   CheckCircle,
-  PenTool,
   AlertCircle,
   Lock,
   LogOut,
-  Layers,
   Wand2,
   Settings,
   Trash2,
   Bell,
   XCircle,
+  Filter
 } from 'lucide-react';
 
 // ==========================================
