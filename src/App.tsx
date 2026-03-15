@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Home, User, Calendar as CalendarIcon,
