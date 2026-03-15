@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Home, User, Calendar as CalendarIcon,
   CalendarCheck, Plus, Users, Briefcase, Clock, ShieldCheck, RefreshCw,
-  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter
+  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter, AlignLeft
 } from 'lucide-react';
 
 // === Firebase 雲端資料庫連線核心 ===
@@ -27,13 +27,14 @@ let firebaseConfig = {
 
 // 為了相容預覽環境，加入防呆機制
 try {
-  if (typeof __firebase_config !== 'undefined') firebaseConfig = JSON.parse(__firebase_config);
+  if (typeof window !== 'undefined' && window.__firebase_config) firebaseConfig = JSON.parse(window.__firebase_config);
+  else if (typeof __firebase_config !== 'undefined') firebaseConfig = JSON.parse(__firebase_config);
 } catch (e) { /* 使用本地 Config */ }
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'staff-scheduling-system';
+const appId = (typeof window !== 'undefined' && window.__app_id) ? window.__app_id : (typeof __app_id !== 'undefined' ? __app_id : 'staff-scheduling-system');
 
 // 雲端同步輔助函數
 const syncStateToCloud = async (firebaseUser, updates) => {
@@ -80,14 +81,6 @@ const generateRandomLeaves = (existingBookedCounts = {}) => {
     }
   }
   return Array.from(leaves.values());
-};
-
-const generateRandomChineseName = () => {
-  const lastNames = ['陳', '林', '黃', '張', '李', '王', '吳', '劉', '蔡', '楊', '許', '鄭', '謝', '洪', '郭', '邱', '曾', '廖', '賴', '徐', '周', '葉', '蘇', '莊', '呂'];
-  const firstNames = ['建國', '佳穎', '志明', '雅婷', '俊宏', '心怡', '家豪', '欣儀', '宗翰', '婉婷', '哲宇', '佩珊', '柏翰', '靜宜', '承恩', '淑君', '冠宇', '怡君', '育瑋', '欣怡', '宇軒', '美玲', '子齊', '惠雯', '信宏', '怡婷', '建良', '秀英'];
-  const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-  const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-  return `${lastName}${firstName}`;
 };
 
 const isHourInTimeStr = (hour, timeStr) => {
@@ -199,7 +192,7 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, monthlyLeav
   return newShifts;
 };
 
-// 系統初始測試資料
+// 系統初始設定 (清除所有測試資料)
 const initialTimeBlockDemands = [
   { id: 'tb1', name: '11:00 - 15:00', reqWeekday: 5, reqWeekend: 15 },
   { id: 'tb2', name: '15:00 - 17:00', reqWeekday: 5, reqWeekend: 7 },
@@ -207,42 +200,15 @@ const initialTimeBlockDemands = [
   { id: 'tb4', name: '22:00 - 00:00', reqWeekday: 5, reqWeekend: 6 },
 ];
 
-const initialRegisteredUsers = [
-  { id: 'u1', name: '陳建國', password: '000000', role: '早班正職' },
-  { id: 'u2', name: '李佳穎', password: '111111', role: '晚班兼職' }, 
-  { id: 'u3', name: '林美玲', password: '222222', role: '早班兼職' }, 
-  { id: 'u4', name: '王志明', password: '333333', role: '晚班正職' }, 
-];
-
-const createInitialLeavesMap = (users) => {
-  const map = {};
-  const globalBooked = {};
-  users.forEach(u => {
-    map[u.name] = generateRandomLeaves(globalBooked);
-  });
-  
-  Object.keys(map).forEach(userName => {
-    map[userName] = map[userName].map(l => {
-      if (globalBooked[l.date] > 1) {
-        return { ...l, status: 'pending' };
-      }
-      return l;
-    });
-  });
-  return map;
-};
-
-const initialLeavesMap = createInitialLeavesMap(initialRegisteredUsers);
+const initialRegisteredUsers = []; // 正式環境：清空預設員工
+const initialLeavesMap = {}; // 正式環境：清空預設假單
 
 const generateInitialShifts = () => {
-  let allShifts = [];
-  initialRegisteredUsers.forEach((u) => {
-    const leaves = initialLeavesMap[u.name] || [];
-    const userShifts = generateFullScheduleForUser(u, leaves, true, 8);
-    allShifts = [...allShifts, ...userShifts];
-  });
-  return allShifts;
+  return []; // 正式環境：清空預設班表
 };
+
+// 預設的公告內容
+const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，每人可自行劃定 8天 假。\n其中包含 1天假日 與 7天平日。\n（送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
 
 // ==========================================
 // 3. 共用與 UI 元件
@@ -335,7 +301,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
            <p className="text-sm font-bold text-red-600 mb-4">確定刪除 {localName} 嗎？此操作不可逆。</p>
            <div className="flex gap-3 w-full">
              <button onClick={() => setShowConfirmDelete(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm">取消</button>
-             <button onClick={() => onDelete(user.id)} className="flex-1 py-2 bg-red-500 text-white rounded-xl font-bold text-sm shadow-md">確定刪除</button>
+             <button onClick={() => onDelete(user.id)} className="flex-1 py-2 bg-red-50 text-white rounded-xl font-bold text-sm shadow-md">確定刪除</button>
            </div>
         </div>
       )}
@@ -868,7 +834,6 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         </div>
       </header>
 
-      {/* 🚀 加入一鍵自動排班的魔法按鈕 */}
       <div className="px-8 mt-6">
         <button onClick={handleMagicClick} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl active:scale-95 transition-all">
           <Wand2 size={20} className={showToast ? 'animate-spin' : ''} /> 執行一鍵排班與時段優化
@@ -877,7 +842,6 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         {showToast && <p className="text-green-600 text-xs text-center mt-2 font-bold">已自動產生全月班表並將人員調度至缺額時段！</p>}
       </div>
 
-      {/* 日曆區塊 */}
       <div className="bg-white mx-8 mt-6 rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
         <div className="grid grid-cols-7 gap-x-2 gap-y-3">
           {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
@@ -898,7 +862,6 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         </div>
       </div>
 
-      {/* 班別切換 Tabs (含各班別已排人數) */}
       <div className="px-8 mt-6">
         <div className="flex bg-gray-200/50 p-1.5 rounded-2xl">
           {['早班', '晚班', '留守'].map(tab => {
@@ -913,7 +876,6 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         </div>
       </div>
 
-      {/* 人員分配區塊 */}
       <div className="px-8 mt-6">
         <div className="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50 min-h-[120px]">
           <h3 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-1.5"><CheckCircle size={14} className="text-blue-500"/> {activeTab} - 已排班人員</h3>
@@ -1036,19 +998,16 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   );
 }
 
-function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onUpdateEmployee, onAddTestEmployee, onDeleteEmployee }) {
-  const [testShift, setTestShift] = useState('早班');
-  const [testPosition, setTestPosition] = useState('正職');
-  
+function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onUpdateEmployee, onDeleteEmployee }) {
   const [filterShift, setFilterShift] = useState('全部');
   const [filterPosition, setFilterPosition] = useState('全部');
 
   const stats = [
     { id: 'total', label: '總人數', count: registeredUsers.length, bg: 'bg-[#111]', text: 'text-gray-300', shadow: 'shadow-black/10', icon: <Users size={48} />, span: 'col-span-2' },
-    { id: 'morn_full', label: '早班(正職以上)', count: registeredUsers.filter(u => u.role.includes('早班') && !u.role.includes('兼職')).length, bg: 'bg-blue-500', text: 'text-blue-100', shadow: 'shadow-blue-500/20', icon: <ShieldCheck size={48} /> },
-    { id: 'night_full', label: '晚班(正職以上)', count: registeredUsers.filter(u => u.role.includes('晚班') && !u.role.includes('兼職')).length, bg: 'bg-indigo-600', text: 'text-indigo-200', shadow: 'shadow-indigo-600/20', icon: <ShieldCheck size={48} /> },
-    { id: 'morn_part', label: '早班兼職', count: registeredUsers.filter(u => u.role.includes('早班兼職')).length, bg: 'bg-orange-500', text: 'text-orange-100', shadow: 'shadow-orange-500/20', icon: <Clock size={48} /> },
-    { id: 'night_part', label: '晚班兼職', count: registeredUsers.filter(u => u.role.includes('晚班兼職')).length, bg: 'bg-rose-500', text: 'text-rose-200', shadow: 'shadow-rose-500/20', icon: <Clock size={48} /> }
+    { id: 'morn_full', label: '早班正職', count: registeredUsers.filter(u => u.role === '早班正職').length, bg: 'bg-blue-500', text: 'text-blue-100', shadow: 'shadow-blue-500/20', icon: <ShieldCheck size={48} /> },
+    { id: 'night_full', label: '晚班正職', count: registeredUsers.filter(u => u.role === '晚班正職').length, bg: 'bg-indigo-600', text: 'text-indigo-200', shadow: 'shadow-indigo-600/20', icon: <ShieldCheck size={48} /> },
+    { id: 'morn_part', label: '早班兼職', count: registeredUsers.filter(u => u.role === '早班兼職').length, bg: 'bg-orange-500', text: 'text-orange-100', shadow: 'shadow-orange-500/20', icon: <Clock size={48} /> },
+    { id: 'night_part', label: '晚班兼職', count: registeredUsers.filter(u => u.role === '晚班兼職').length, bg: 'bg-rose-500', text: 'text-rose-200', shadow: 'shadow-rose-500/20', icon: <Clock size={48} /> }
   ];
 
   const filteredUsers = registeredUsers.filter(user => {
@@ -1082,29 +1041,6 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onU
         </div>
       </div>
 
-      <div className="px-8 mt-4 mb-2">
-        <div className="bg-white rounded-[1.5rem] p-4 shadow-[0_4px_15px_rgb(0,0,0,0.02)] border border-blue-50 flex flex-col gap-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-          <h3 className="text-sm font-bold text-[#111] flex items-center gap-2"><Wand2 size={16} className="text-blue-500" /> 快速新增測試人員</h3>
-          <p className="text-xs text-gray-500 mb-1">產生的人員會自帶合法假單 (1日7平)</p>
-          <div className="flex items-center gap-2">
-            <select value={testShift} onChange={(e) => setTestShift(e.target.value)} className="w-1/3 appearance-none bg-gray-50 text-gray-800 font-bold text-xs py-2 pl-3 pr-6 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
-              <option value="早班">早班</option>
-              <option value="晚班">晚班</option>
-            </select>
-            <select value={testPosition} onChange={(e) => setTestPosition(e.target.value)} className="flex-1 appearance-none bg-gray-50 text-gray-800 font-bold text-xs py-2 pl-3 pr-6 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
-              <option value="兼職">兼職</option>
-              <option value="正職">正職</option>
-              <option value="儲備幹部">儲備幹部</option>
-              <option value="組長">組長</option>
-              <option value="副店長">副店長</option>
-              <option value="店長">店長</option>
-            </select>
-            <button onClick={() => onAddTestEmployee(`${testShift}${testPosition}`)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm active:scale-95 transition-all whitespace-nowrap">+ 新增</button>
-          </div>
-        </div>
-      </div>
-
       <div className="px-8 mt-5 mb-2">
         <div className="bg-white rounded-[1.5rem] p-3.5 shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-100 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-gray-600 font-extrabold text-sm pl-1 shrink-0">
@@ -1112,12 +1048,12 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onU
             <span>篩選名單</span>
           </div>
           <div className="flex items-center gap-2">
-            <select value={filterShift} onChange={(e) => setFilterShift(e.target.value)} className="appearance-none bg-gray-50 text-gray-700 font-bold text-xs py-2 pl-3 pr-7 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+            <select value={filterShift} onChange={(e) => setFilterShift(e.target.value)} className="appearance-none bg-gray-50 text-gray-700 font-bold text-xs py-2 pl-3 pr-7 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%239CA3AF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_8px_center]">
               <option value="全部">所有班別</option>
               <option value="早班">早班</option>
               <option value="晚班">晚班</option>
             </select>
-            <select value={filterPosition} onChange={(e) => setFilterPosition(e.target.value)} className="appearance-none bg-gray-50 text-gray-700 font-bold text-xs py-2 pl-3 pr-7 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+            <select value={filterPosition} onChange={(e) => setFilterPosition(e.target.value)} className="appearance-none bg-gray-50 text-gray-700 font-bold text-xs py-2 pl-3 pr-7 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%239CA3AF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_8px_center]">
               <option value="全部">所有職位</option>
               <option value="兼職">兼職</option>
               <option value="正職">正職</option>
@@ -1146,7 +1082,7 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onU
   );
 }
 
-function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves }) {
+function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves, announcement, onLogout }) {
   const initialLeaves = employeeLeaves[currentUser] || [];
   const [selectedLeaves, setSelectedLeaves] = useState(initialLeaves);
   const [isSubmitted, setIsSubmitted] = useState(false); 
@@ -1225,17 +1161,26 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves 
           </div>
         </div>
       )}
-      <header className="shrink-0 sticky top-0 bg-[#f8f9fc]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-4 border-b border-gray-200/50">
+      
+      <header className="shrink-0 sticky top-0 bg-[#f8f9fc]/90 backdrop-blur-md z-10 flex items-center justify-between px-8 pt-12 pb-4 border-b border-gray-200/50">
         <div>
           <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">本月排休</h1>
           <p className="text-xs font-semibold text-gray-500 mt-0.5">{currentUser} {isSubmitted ? ' - 假單已鎖定' : ` - 已選 ${selectedLeaves.length} 天 (規定自選 ${MAX_LEAVES} 天)`}</p>
         </div>
+        <button onClick={onLogout} className="w-10 h-10 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-full flex items-center justify-center transition shadow-sm active:scale-95" title="安全登出">
+          <LogOut size={16} strokeWidth={2.5} />
+        </button>
       </header>
 
       <div className="px-8 mt-6 flex-1">
-        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-6">
-          <p className="text-xs font-bold text-blue-800 leading-relaxed">
-             系統排休規則：<br />為確保公平性，每人可自行劃定 <strong className="text-red-500">{MAX_LEAVES}天</strong> 假。<br />其中包含 <strong className="text-blue-600">{MAX_WEEKEND_LEAVES}天假日</strong> 與 <strong className="text-blue-600">{MAX_WEEKDAY_LEAVES}天平日</strong>。<br />（送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）
+        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-6 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+          <p className="text-xs font-bold text-blue-800 leading-relaxed text-center">
+             {announcement.split('\n').map((line, i) => (
+                <span key={i}>
+                  {line}
+                  <br />
+                </span>
+             ))}
           </p>
         </div>
 
@@ -1335,7 +1280,10 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves 
   );
 }
 
-function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLeaveDays, setMonthlyLeaveDays, dailyWorkHours, setDailyWorkHours, timeBlockDemands, setTimeBlockDemands }) {
+function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLeaveDays, setMonthlyLeaveDays, dailyWorkHours, setDailyWorkHours, timeBlockDemands, setTimeBlockDemands, announcement, onUpdateAnnouncement }) {
+  const [localAnnouncement, setLocalAnnouncement] = useState(announcement);
+  const [showSavedToast, setShowSavedToast] = useState(false);
+
   const updateRequiredCount = (id, delta, isWeekend) => {
     setTimeBlockDemands((prev) =>
       prev.map((s) => {
@@ -1348,17 +1296,48 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLea
     );
   };
 
+  const handleSaveAnnouncement = () => {
+    onUpdateAnnouncement(localAnnouncement);
+    setShowSavedToast(true);
+    setTimeout(() => setShowSavedToast(false), 3000);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f5f6f8] pb-32 animate-in slide-in-from-right-8 duration-300 relative">
       <header className="sticky top-0 bg-[#f5f6f8]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-4 border-b border-gray-200/50">
         <button onClick={onBack} className="p-2 -ml-2 text-gray-800 hover:bg-gray-200 rounded-full transition mr-4"><ChevronLeft size={28} strokeWidth={2} /></button>
         <div>
           <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">後台設定</h1>
-          <p className="text-xs font-semibold text-gray-500 mt-0.5">排班規則與四大時段需求</p>
+          <p className="text-xs font-semibold text-gray-500 mt-0.5">排班規則與系統公告</p>
         </div>
       </header>
 
       <div className="px-8 mt-6 space-y-6">
+        
+        {/* 新增的公告編輯區塊 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4">
+             <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600"><AlignLeft size={20} strokeWidth={2.5} /></div>
+             <div>
+                <h3 className="font-bold text-[#111] text-lg">排休系統公告</h3>
+                <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Announcement</p>
+             </div>
+          </div>
+          <textarea
+            value={localAnnouncement}
+            onChange={(e) => setLocalAnnouncement(e.target.value)}
+            className="w-full bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none leading-relaxed transition-all resize-none"
+            rows={4}
+            placeholder="請輸入要在員工排休畫面上方顯示的公告..."
+          />
+          <button 
+            onClick={handleSaveAnnouncement} 
+            className="mt-3 w-full py-3.5 bg-[#111] text-white rounded-xl font-bold shadow-sm shadow-black/10 hover:bg-gray-800 transition-colors flex justify-center items-center gap-2 active:scale-95"
+          >
+             {showSavedToast ? <><CheckCircle size={18} className="text-green-400" /> 已發佈至雲端</> : '儲存並發佈公告'}
+          </button>
+        </div>
+
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50 flex justify-between items-center cursor-pointer" onClick={() => setRuleEnabled(!ruleEnabled)}>
           <div>
             <h3 className="font-bold text-[#111] text-lg">啟用排班防呆規則</h3>
@@ -1450,11 +1429,14 @@ export default function App() {
   const [monthlyLeaveDays, setMonthlyLeaveDays] = useState(8);
   const [dailyWorkHours, setDailyWorkHours] = useState(9);
   const [shifts, setShifts] = useState(() => generateInitialShifts());
+  const [announcement, setAnnouncement] = useState(DEFAULT_ANNOUNCEMENT);
 
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        if (typeof window !== 'undefined' && window.__initial_auth_token) {
+          await signInWithCustomToken(auth, window.__initial_auth_token);
+        } else if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
           await signInAnonymously(auth);
@@ -1477,12 +1459,14 @@ export default function App() {
         if (data.shifts) setShifts(data.shifts);
         if (data.leaves) setEmployeeLeaves(data.leaves);
         if (data.demands) setTimeBlockDemands(data.demands);
+        if (data.announcement !== undefined) setAnnouncement(data.announcement);
       } else {
         setDoc(docRef, {
           users: initialRegisteredUsers,
           shifts: generateInitialShifts(),
           leaves: initialLeavesMap,
-          demands: initialTimeBlockDemands
+          demands: initialTimeBlockDemands,
+          announcement: DEFAULT_ANNOUNCEMENT
         }, { merge: true });
       }
     }, (err) => console.error("Snapshot error", err));
@@ -1554,26 +1538,6 @@ export default function App() {
     setShifts(newShifts);
     
     syncStateToCloud(firebaseUser, { users: newUsers, leaves: newLeaves, shifts: newShifts });
-  };
-
-  const handleAddTestEmployee = (roleType) => {
-    let newName = generateRandomChineseName();
-    while (registeredUsers.some(u => u.name === newName)) newName = generateRandomChineseName();
-    let newPassword;
-    do { newPassword = Math.floor(100000 + Math.random() * 900000).toString(); } while (registeredUsers.some((u) => u.password === newPassword));
-
-    const newUser = { id: `u_${Date.now()}_${Math.random().toString(36).substring(7)}`, name: newName, password: newPassword, role: roleType };
-    const newUsers = [...registeredUsers, newUser];
-    setRegisteredUsers(newUsers);
-    
-    const currentBookedCounts = {};
-    Object.values(employeeLeaves).flat().forEach(l => { currentBookedCounts[l.date] = (currentBookedCounts[l.date] || 0) + 1; });
-
-    const newLeavesArr = generateRandomLeaves(currentBookedCounts);
-    const newMap = { ...employeeLeaves, [newName]: newLeavesArr };
-    
-    setEmployeeLeaves(newMap);
-    syncStateToCloud(firebaseUser, { users: newUsers, leaves: newMap });
   };
 
   const handleApproveLeave = (emp, date) => {
@@ -1693,6 +1657,11 @@ export default function App() {
     if (firebaseUser) syncStateToCloud(firebaseUser, { shifts: updatedShifts });
   };
 
+  const handleUpdateAnnouncement = (newText) => {
+    setAnnouncement(newText);
+    syncStateToCloud(firebaseUser, { announcement: newText });
+  };
+
   const handleLoginSuccess = (userName, userRole) => {
     setCurrentUser(userName);
     setRole(userRole);
@@ -1726,11 +1695,11 @@ export default function App() {
 
       {activeScreen === 'schedule_editor' && <ScheduleEditorScreen shifts={shifts} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} timeBlockDemands={timeBlockDemands} onAddShift={handleAddManualShift} onRemoveShift={handleRemoveManualShift} onAutoSchedule={handleAutoSchedule} onBack={handleBack} ruleEnabled={ruleEnabled} monthlyLeaveDays={monthlyLeaveDays} />}
       
-      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} onSaveLeaves={handleSaveLeaves} />}
+      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
       
-      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} onUpdateEmployee={handleUpdateEmployee} onAddTestEmployee={handleAddTestEmployee} onDelete={handleDeleteEmployee} />}
+      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} />}
       
-      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} monthlyLeaveDays={monthlyLeaveDays} setMonthlyLeaveDays={setMonthlyLeaveDays} dailyWorkHours={dailyWorkHours} setDailyWorkHours={setDailyWorkHours} timeBlockDemands={timeBlockDemands} setTimeBlockDemands={setTimeBlockDemands} />}
+      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} monthlyLeaveDays={monthlyLeaveDays} setMonthlyLeaveDays={setMonthlyLeaveDays} dailyWorkHours={dailyWorkHours} setDailyWorkHours={setDailyWorkHours} timeBlockDemands={timeBlockDemands} setTimeBlockDemands={setTimeBlockDemands} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} />}
       
       {activeScreen === 'employee_profile' && <EmployeeProfileScreen currentUser={currentUser} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} />}
       
