@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Home, User, Calendar as CalendarIcon,
   CalendarCheck, Plus, Users, Briefcase, Clock, ShieldCheck, RefreshCw,
-  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter, AlignLeft
+  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter, AlignLeft, Coffee, X
 } from 'lucide-react';
 
 // === Firebase 雲端資料庫連線核心 ===
@@ -48,39 +48,33 @@ const syncStateToCloud = async (firebaseUser, updates) => {
 };
 
 // ==========================================
-// 1. 工具函數與核心演算法
+// 1. 工具函數與核心演算法 (加入行政院假日支援)
 // ==========================================
 
-const isWeekendDay = (day) => {
-  const rem = day % 7;
-  return rem === 1 || rem === 0;
+const taiwanHolidays = {
+  '2026/1/1': '元旦',
+  '2026/2/16': '春節', '2026/2/17': '春節', '2026/2/18': '春節', '2026/2/19': '春節', '2026/2/20': '春節', '2026/2/23': '春節', '2026/2/24': '春節',
+  '2026/2/28': '228紀念', '2026/3/2': '228補假',
+  '2026/4/3': '兒童節', '2026/4/4': '清明節', '2026/4/6': '清明補假',
+  '2026/5/1': '勞動節',
+  '2026/6/19': '端午連假', '2026/6/20': '端午節', '2026/6/21': '端午連假',
+  '2026/9/25': '中秋連假', '2026/9/26': '中秋節', '2026/9/27': '中秋連假',
+  '2026/10/9': '國慶連假', '2026/10/10': '國慶日', '2026/10/11': '國慶連假'
 };
 
-const generateRandomLeaves = (existingBookedCounts = {}) => {
-  const leaves = new Map();
-  let wknd = 0;
-  let wkdy = 0;
+const getDayInfo = (year, month, day) => {
+  const date = new Date(year, month - 1, day);
+  const dayOfWeek = date.getDay();
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const dateKey = `${year}/${month}/${day}`;
+  const holidayName = taiwanHolidays[dateKey] || null;
 
-  while (leaves.size < 8) {
-    const day = Math.floor(Math.random() * 31) + 1;
-    const dateStr = `3/${day}`;
-    if (leaves.has(dateStr)) continue;
-
-    const isWknd = isWeekendDay(day);
-    const bookedCount = existingBookedCounts[dateStr] || 0;
-    const status = bookedCount >= 1 ? 'pending' : 'approved';
-
-    if (isWknd && wknd < 1) {
-      leaves.set(dateStr, { date: dateStr, status });
-      existingBookedCounts[dateStr] = bookedCount + 1;
-      wknd++;
-    } else if (!isWknd && wkdy < 7) {
-      leaves.set(dateStr, { date: dateStr, status });
-      existingBookedCounts[dateStr] = bookedCount + 1;
-      wkdy++;
-    }
-  }
-  return Array.from(leaves.values());
+  return {
+    isWeekend,
+    isHoliday: !!holidayName,
+    holidayName,
+    isOffDay: isWeekend || !!holidayName // 例假日、連假、國定假日皆視為休假日
+  };
 };
 
 const isHourInTimeStr = (hour, timeStr) => {
@@ -135,17 +129,21 @@ const isDayUnderstaffed = (dateStr, isWeekend, shifts, demands) => {
   return false;
 };
 
-const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, monthlyLeaveDays) => {
+const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveDays, targetYear, targetMonth) => {
   if (!user.role) return [];
-  const isLeave = Array(31).fill(false);
+  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+  const isLeave = Array(daysInMonth).fill(false);
+  
   leavesArray.forEach((l) => {
-    const day = parseInt(l.date.split('/')[1]);
-    isLeave[day - 1] = true;
+    const [y, m, d] = l.date.split('/').map(Number);
+    if (y === targetYear && m === targetMonth) {
+      isLeave[d - 1] = true;
+    }
   });
 
-  let extraLeaves = monthlyLeaveDays - leavesArray.length;
+  let extraLeaves = totalLeaveDays - isLeave.filter(Boolean).length;
 
-  for (let i = 0; i < 31; i++) {
+  for (let i = 0; i < daysInMonth; i++) {
     if (!isLeave[i] && ruleEnabled) {
       let windowStart = Math.max(0, i - 6);
       let workDaysInWindow = 0;
@@ -159,7 +157,7 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, monthlyLeav
     }
   }
 
-  for (let i = 30; i >= 0 && extraLeaves > 0; i--) {
+  for (let i = daysInMonth - 1; i >= 0 && extraLeaves > 0; i--) {
     if (!isLeave[i]) {
       isLeave[i] = true;
       extraLeaves--;
@@ -167,14 +165,15 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, monthlyLeav
   }
 
   const newShifts = [];
-  for (let i = 0; i < 31; i++) {
+  for (let i = 0; i < daysInMonth; i++) {
     if (!isLeave[i]) {
       const dayNum = i + 1;
-      const dateStr = `3/${dayNum}`;
-      const dayOfWeek = (dayNum + 6) % 7;
+      const dateStr = `${targetYear}/${targetMonth}/${dayNum}`;
+      const dayOfWeek = new Date(targetYear, targetMonth - 1, dayNum).getDay();
       const dayStr = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][dayOfWeek];
-      const isWknd = isWeekendDay(dayNum);
-      const exactTime = getRoleDefaultTime(user.role, isWknd, null);
+      
+      const info = getDayInfo(targetYear, targetMonth, dayNum);
+      const exactTime = getRoleDefaultTime(user.role, info.isOffDay, null);
       const shiftCat = user.role.includes('晚班') ? '晚班' : '早班';
 
       newShifts.push({
@@ -192,7 +191,7 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, monthlyLeav
   return newShifts;
 };
 
-// 系統初始設定 (清除所有測試資料)
+// 系統初始設定
 const initialTimeBlockDemands = [
   { id: 'tb1', name: '11:00 - 15:00', reqWeekday: 5, reqWeekend: 15 },
   { id: 'tb2', name: '15:00 - 17:00', reqWeekday: 5, reqWeekend: 7 },
@@ -200,15 +199,12 @@ const initialTimeBlockDemands = [
   { id: 'tb4', name: '22:00 - 00:00', reqWeekday: 5, reqWeekend: 6 },
 ];
 
-const initialRegisteredUsers = []; // 正式環境：清空預設員工
-const initialLeavesMap = {}; // 正式環境：清空預設假單
+const initialRegisteredUsers = []; 
+const initialLeavesMap = {}; 
+const generateInitialShifts = () => { return []; };
+const initialLeaveSettings = { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 };
 
-const generateInitialShifts = () => {
-  return []; // 正式環境：清空預設班表
-};
-
-// 預設的公告內容
-const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，每人可自行劃定 8天 假。\n其中包含 1天假日 與 7天平日。\n（送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
+const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，請依據系統當前設定之額度自行劃定排休。\n（假單送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
 
 // ==========================================
 // 3. 共用與 UI 元件
@@ -252,15 +248,21 @@ function BottomNav({ role, activeScreen, onNavigate, pendingCount }) {
   );
 }
 
-function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
+function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate, onDelete, onAddLeave, onRemoveLeave }) {
   const [localName, setLocalName] = useState(user.name);
   const [localShift, setLocalShift] = useState(user.role ? user.role.substring(0, 2) : '早班');
   const [localPosition, setLocalPosition] = useState(user.role ? user.role.substring(2) : '正職');
   const [localPassword, setLocalPassword] = useState(user.password);
   const [pwdError, setPwdError] = useState('');
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  
+  const [newLeaveMonth, setNewLeaveMonth] = useState('');
+  const [newLeaveDay, setNewLeaveDay] = useState('');
+  const [leaveToDelete, setLeaveToDelete] = useState(null); // 防呆刪除假單
 
   const localRole = `${localShift}${localPosition}`;
+  const maxTotalLeaves = leaveSettings?.total || 8;
+  const defaultYear = leaveSettings?.year || 2026;
 
   const handleBlur = () => {
     if (!/^\d{6}$/.test(localPassword)) {
@@ -295,7 +297,8 @@ function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
   };
 
   return (
-    <div className="bg-white rounded-[1.5rem] p-4 shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50 flex flex-col gap-3 transition-shadow hover:shadow-md relative">
+    <div className="bg-white rounded-[1.5rem] p-4 shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50 flex flex-col gap-3 transition-shadow hover:shadow-md relative overflow-hidden">
+      {/* 刪除員工防呆 */}
       {showConfirmDelete && (
         <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-20 rounded-[1.5rem] flex flex-col items-center justify-center p-4">
            <p className="text-sm font-bold text-red-600 mb-4">確定刪除 {localName} 嗎？此操作不可逆。</p>
@@ -306,7 +309,20 @@ function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      {/* 刪除假單防呆 */}
+      {leaveToDelete && (
+        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-30 rounded-[1.5rem] flex flex-col items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+           <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-orange-500 mb-2 shadow-inner"><AlertCircle size={24} /></div>
+           <p className="text-sm font-bold text-gray-800 mb-1">確定移除此假單？</p>
+           <p className="text-xs font-black text-orange-600 mb-4 bg-orange-100 border border-orange-200 px-3 py-1 rounded-lg">{leaveToDelete}</p>
+           <div className="flex gap-3 w-full">
+             <button onClick={() => setLeaveToDelete(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors">取消</button>
+             <button onClick={() => { onRemoveLeave(user.name, leaveToDelete); setLeaveToDelete(null); }} className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-bold text-sm shadow-md hover:bg-red-600 transition-colors active:scale-95">確定移除</button>
+           </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between relative z-10">
         <div className="flex items-center gap-3 flex-1">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 ${localRole.includes('兼職') ? 'bg-orange-500' : 'bg-[#111]'}`}>
             {localName.charAt(0)}
@@ -320,7 +336,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
         </button>
       </div>
 
-      <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between border border-gray-100 mt-1">
+      <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between border border-gray-100 mt-1 relative z-10">
         <span className="text-xs font-bold text-gray-500 flex items-center gap-1.5 ml-1"><Briefcase size={12} /> 身分綁定</span>
         <div className="flex gap-1.5">
           <select value={localShift} onChange={handleShiftChange} className={`appearance-none font-bold text-xs py-1.5 pl-2 pr-6 rounded-lg border focus:outline-none focus:ring-2 cursor-pointer shadow-sm relative z-10 bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%232563EB%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_8px_center] ${localRole.includes('兼職') ? 'bg-orange-50 text-orange-600 border-orange-100 focus:ring-orange-500' : 'bg-blue-50 text-blue-600 border-blue-100 focus:ring-blue-500'}`}>
@@ -337,24 +353,41 @@ function EmployeeEditCard({ user, allUsers, userLeaves, onUpdate, onDelete }) {
           </select>
         </div>
       </div>
-      <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between border border-gray-100">
+      <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between border border-gray-100 relative z-10">
         <span className="text-xs font-bold text-gray-500 flex items-center gap-1.5 ml-1"><Lock size={12} /> 登入密碼</span>
         <div className="flex items-center gap-2">
           {pwdError && <span className="text-[10px] text-red-500 font-bold animate-pulse">{pwdError}</span>}
           <input type="text" maxLength={6} value={localPassword} onChange={(e) => setLocalPassword(e.target.value.replace(/\D/g, ''))} onBlur={handleBlur} placeholder="6位數字" className={`w-20 font-bold text-xs py-1.5 px-2 rounded-lg border focus:outline-none focus:ring-2 text-center shadow-sm transition-colors ${pwdError ? 'bg-red-50 border-red-300 text-red-600 focus:ring-red-500' : 'bg-white border-blue-100 text-blue-600 focus:ring-blue-500'}`} />
         </div>
       </div>
-      <div className="bg-gray-50 rounded-xl p-2.5 flex flex-col gap-2 border border-gray-100">
+      
+      <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3 border border-gray-100 relative z-10">
         <div className="flex items-center justify-between ml-1">
-          <span className="text-xs font-bold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={12} /> 排休狀況 ({userLeaves.length}/8)</span>
+          <span className="text-xs font-bold text-gray-500 flex items-center gap-1.5">
+            <CalendarIcon size={12} /> 排休狀況 ({userLeaves.length}/{maxTotalLeaves})
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400 font-bold">補假</span>
+            <input type="text" maxLength={2} value={newLeaveMonth} onChange={e => setNewLeaveMonth(e.target.value.replace(/\D/g, ''))} className="w-7 bg-white border border-gray-200 rounded px-1 py-0.5 text-xs outline-none focus:border-blue-500 text-center font-bold shadow-sm" placeholder="月" />
+            <span className="text-[10px] text-gray-400 font-bold">/</span>
+            <input type="text" maxLength={2} value={newLeaveDay} onChange={e => setNewLeaveDay(e.target.value.replace(/\D/g, ''))} className="w-7 bg-white border border-gray-200 rounded px-1 py-0.5 text-xs outline-none focus:border-blue-500 text-center font-bold shadow-sm" placeholder="日" />
+            <button onClick={() => { if(newLeaveMonth && newLeaveDay) { onAddLeave(user.name, `${defaultYear}/${newLeaveMonth}/${newLeaveDay}`); setNewLeaveMonth(''); setNewLeaveDay(''); } }} className="bg-[#111] text-white rounded p-0.5 shadow-sm active:scale-90 transition-transform"><Plus size={12}/></button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {userLeaves.length > 0 ? (
-            userLeaves.map((l) => (
-              <span key={l.date} className={`text-[10px] px-2 py-1 rounded-md font-bold ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-600 border border-green-200'}`}>
-                {l.date} {l.status === 'pending' ? '(待核)' : ''}
-              </span>
-            ))
+            userLeaves.map((l) => {
+              const [y, m, d] = l.date.split('/');
+              const displayDate = `${m}/${d}`;
+              return (
+                <span key={l.date} className={`relative group flex items-center gap-1 text-[10px] pl-2 pr-1.5 py-1 rounded-md font-bold shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-600 border border-green-200'}`}>
+                  {displayDate} {l.status === 'pending' ? '(待核)' : ''}
+                  <button onClick={() => setLeaveToDelete(l.date)} className="bg-white/50 hover:bg-red-500 hover:text-white text-gray-400 rounded-full p-0.5 transition-colors" title="移除此假單">
+                    <X size={10} strokeWidth={3} />
+                  </button>
+                </span>
+              );
+            })
           ) : (
             <span className="text-[10px] text-gray-400 font-medium px-1">尚未排假</span>
           )}
@@ -469,7 +502,7 @@ function RegisterScreen({ onGoLogin, onRegister }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">職位 <span className="text-red-500">*</span></label>
+             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">職位 <span className="text-red-500">*</span></label>
             <select value={position} onChange={(e) => setPosition(e.target.value)} className="w-full bg-gray-50 text-gray-800 font-medium py-3.5 px-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-100 cursor-pointer">
               <option value="兼職">兼職</option>
               <option value="正職">正職</option>
@@ -487,16 +520,41 @@ function RegisterScreen({ onGoLogin, onRegister }) {
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">確認密碼 <span className="text-red-500">*</span></label>
           <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="請再次輸入 6 位數字密碼" maxLength={6} className="w-full bg-gray-50 text-gray-800 font-medium py-3.5 px-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-100" />
-        </div>
+         </div>
         <button type="submit" className="w-full py-4 rounded-2xl bg-[#111] text-white font-bold shadow-lg shadow-black/10 hover:bg-gray-800 mt-6 active:scale-[0.98] transition-all">完成註冊</button>
       </form>
     </div>
   );
 }
 
-function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, registeredUsers, employeeLeaves, onApproveLeave, onRejectLeave, onOpenEditor, onOpenLeaveApproval }) {
-  const [selectedHomeDate, setSelectedHomeDate] = useState('3/16');
+function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, registeredUsers, employeeLeaves, leaveSettings, onApproveLeave, onRejectLeave, onOpenEditor, onOpenLeaveApproval }) {
+  const [viewYear, setViewYear] = useState(leaveSettings?.year || 2026);
+  const [viewMonth, setViewMonth] = useState(leaveSettings?.month || 3);
+  
+  useEffect(() => {
+    setViewYear(leaveSettings?.year || 2026);
+    setViewMonth(leaveSettings?.month || 3);
+  }, [leaveSettings?.year, leaveSettings?.month]);
+
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const [selectedHomeDate, setSelectedHomeDate] = useState(`${leaveSettings?.year || 2026}/${leaveSettings?.month || 3}/1`);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+
+  useEffect(() => {
+    setSelectedHomeDate(`${viewYear}/${viewMonth}/1`);
+  }, [viewYear, viewMonth]);
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(v => v - 1); }
+    else setViewMonth(v => v - 1);
+  };
+
+  const handleNextMonth = () => {
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(v => v + 1); }
+    else setViewMonth(v => v + 1);
+  };
 
   const getUserTypeBadge = (name) => {
     const u = registeredUsers.find((user) => user.name === name);
@@ -509,8 +567,6 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
   };
 
   const displayShifts = role === 'manager' ? shifts : shifts.filter((s) => s.assignee === currentUser);
-  const marchDays = Array.from({ length: 31 }, (_, i) => i + 1);
-  const timelineHours = Array.from({ length: 13 }, (_, i) => i + 11);
 
   const pendingLeaves = [];
   if (role === 'manager') {
@@ -527,19 +583,19 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
     return acc;
   }, []);
 
-  const getRoleCountsForDate = (dateStr) => {
+  const getShiftCategoryCountsForDate = (dateStr) => {
     const dayShifts = displayShifts.filter((s) => s.date === dateStr);
-    let counts = { morn_full: 0, night_full: 0, morn_part: 0, night_part: 0 };
+    let counts = { morning: 0, night: 0, stay: 0 };
     dayShifts.forEach((s) => {
-      if (s.type.includes('早班') && !s.type.includes('兼職')) counts.morn_full++;
-      else if (s.type.includes('晚班') && !s.type.includes('兼職')) counts.night_full++;
-      else if (s.type.includes('早班') && s.type.includes('兼職')) counts.morn_part++;
-      else if (s.type.includes('晚班') && s.type.includes('兼職')) counts.night_part++;
+      const cat = s.shiftCategory || (s.type.includes('晚') ? '晚班' : (s.type.includes('留守') ? '留守' : '早班'));
+      if (cat === '早班') counts.morning++;
+      else if (cat === '晚班') counts.night++;
+      else if (cat === '留守') counts.stay++;
     });
     return counts;
   };
 
-  const roleCounts = getRoleCountsForDate(selectedHomeDate);
+  const catCounts = getShiftCategoryCountsForDate(selectedHomeDate);
 
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar pb-32 animate-in fade-in duration-300 relative">
@@ -572,12 +628,12 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
       <section className={`${role === 'manager' ? 'mt-6' : 'mt-2'} bg-white rounded-t-[2.5rem] pt-8 pb-8 shadow-[0_-10px_40px_rgba(0,0,0,0.02)] min-h-[400px]`}>
         <div className="px-8 flex justify-between items-end mb-6">
           <div>
-            <h2 className="text-2xl font-extrabold text-[#111] tracking-tight">3月份</h2>
-            <p className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mt-1">March 2026</p>
+            <h2 className="text-2xl font-extrabold text-[#111] tracking-tight">{viewMonth}月份</h2>
+            <p className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mt-1">{viewYear}</p>
           </div>
           <div className="flex gap-2">
-            <button className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronLeft size={16} strokeWidth={2.5} /></button>
-            <button className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronRight size={16} strokeWidth={2.5} /></button>
+            <button onClick={handlePrevMonth} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronLeft size={16} strokeWidth={2.5} /></button>
+            <button onClick={handleNextMonth} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronRight size={16} strokeWidth={2.5} /></button>
           </div>
         </div>
 
@@ -586,12 +642,12 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
               <div key={d} className="text-center text-[10px] font-bold text-gray-400 mb-1">{d}</div>
             ))}
-            {marchDays.map((day) => {
-              const dateStr = `3/${day}`;
-              const isWknd = isWeekendDay(day);
+            {viewDays.map((day) => {
+              const dateStr = `${viewYear}/${viewMonth}/${day}`;
+              const info = getDayInfo(viewYear, viewMonth, day);
               const hasShift = displayShifts.some((s) => s.date === dateStr);
               const isSelected = selectedHomeDate === dateStr;
-              const isUnderstaffed = role === 'manager' ? isDayUnderstaffed(dateStr, isWknd, shifts, timeBlockDemands) : false;
+              const isUnderstaffed = role === 'manager' ? isDayUnderstaffed(dateStr, info.isOffDay, shifts, timeBlockDemands) : false;
 
               const myLeaves = role !== 'manager' ? employeeLeaves[currentUser] || [] : [];
               const myLeaveToday = myLeaves.find(l => l.date === dateStr);
@@ -599,12 +655,14 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
               let btnClass = 'bg-transparent text-gray-600 hover:bg-gray-50';
               if (isSelected) btnClass = 'bg-[#111] text-white shadow-lg transform scale-110 z-10';
               else if (myLeaveToday) btnClass = myLeaveToday.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-green-50 text-green-600 border border-green-100';
-              else if (hasShift) btnClass = 'bg-blue-50/50 text-blue-700 hover:bg-blue-100';
+              else if (hasShift) btnClass = 'bg-blue-50/50 text-blue-700 hover:bg-blue-100 font-bold';
               else if (isUnderstaffed) btnClass = 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100';
+              else if (info.isOffDay) btnClass = 'bg-red-50/30 text-red-500';
 
               return (
                 <button key={day} onClick={() => setSelectedHomeDate(dateStr)} className={`relative w-full aspect-square rounded-2xl flex flex-col items-center justify-center transition-all duration-200 ${btnClass}`}>
-                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : ''}`}>{day}</span>
+                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : info.isWeekend ? 'text-orange-500' : '')}`}>{day}</span>
+                  {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                   {isUnderstaffed && !myLeaveToday && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full shadow-sm border-2 border-white z-20"></div>}
                   {!isUnderstaffed && hasShift && !isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                   {hasShift && isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
@@ -616,26 +674,36 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
 
         <div className="px-8">
           <div className="flex items-center gap-2 mb-6 border-b border-gray-100 pb-2">
-            <h3 className="text-sm font-bold text-[#111] tracking-wide">{selectedHomeDate} <span className="text-gray-400 font-medium">當日時段班表</span></h3>
+            <h3 className="text-sm font-bold text-[#111] tracking-wide">{selectedHomeDate.split('/')[1]}/{selectedHomeDate.split('/')[2]} <span className="text-gray-400 font-medium">當日時段班表</span></h3>
+            {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).isHoliday && (
+               <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-md border border-red-100 ml-2">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).holidayName}
+               </span>
+            )}
           </div>
 
           {role === 'manager' && (
-            <div className="mb-6 grid grid-cols-2 gap-2">
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-2.5 flex justify-between items-center shadow-sm">
-                <span className="text-[11px] font-bold text-blue-800">早班正職</span>
-                <span className="text-sm font-black text-blue-600">{roleCounts.morn_full} 人</span>
+            <div className="mb-6 grid grid-cols-3 gap-3">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex flex-col items-center justify-center shadow-sm transition-transform hover:scale-105">
+                <span className="text-xs font-bold text-blue-800 mb-1">早班</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-blue-600 leading-none">{catCounts.morning}</span>
+                  <span className="text-xs font-bold text-blue-500">人</span>
+                </div>
               </div>
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-2.5 flex justify-between items-center shadow-sm">
-                <span className="text-[11px] font-bold text-indigo-800">晚班正職</span>
-                <span className="text-sm font-black text-indigo-600">{roleCounts.night_full} 人</span>
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 flex flex-col items-center justify-center shadow-sm transition-transform hover:scale-105">
+                <span className="text-xs font-bold text-indigo-800 mb-1">晚班</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-indigo-600 leading-none">{catCounts.night}</span>
+                  <span className="text-xs font-bold text-indigo-500">人</span>
+                </div>
               </div>
-              <div className="bg-orange-50 border border-orange-100 rounded-xl p-2.5 flex justify-between items-center shadow-sm">
-                <span className="text-[11px] font-bold text-orange-800">早班兼職</span>
-                <span className="text-sm font-black text-orange-600">{roleCounts.morn_part} 人</span>
-              </div>
-              <div className="bg-rose-50 border border-rose-100 rounded-xl p-2.5 flex justify-between items-center shadow-sm">
-                <span className="text-[11px] font-bold text-rose-800">晚班兼職</span>
-                <span className="text-sm font-black text-rose-600">{roleCounts.night_part} 人</span>
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 flex flex-col items-center justify-center shadow-sm transition-transform hover:scale-105">
+                <span className="text-xs font-bold text-orange-800 mb-1">留守</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-orange-600 leading-none">{catCounts.stay}</span>
+                  <span className="text-xs font-bold text-orange-500">人</span>
+                </div>
               </div>
             </div>
           )}
@@ -652,76 +720,68 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
             </div>
           )}
 
-          <div className="relative">
-            <div className="absolute left-[2.8rem] top-2 bottom-2 w-px bg-gray-100"></div>
+          <div className="flex flex-col gap-4">
             {(() => {
               const shiftsForDate = displayShifts.filter((s) => s.date === selectedHomeDate);
-              const isWeekend = isWeekendDay(parseInt(selectedHomeDate.split('/')[1]));
 
               if (shiftsForDate.length === 0) {
                 return (
-                  <div className="text-center py-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                    <p className="text-gray-400 font-medium text-sm">本日無排定班表</p>
+                  <div className="text-center py-10 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
+                    <Coffee size={32} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-gray-400 font-bold text-sm">本日無排定班表</p>
                   </div>
                 );
               }
 
-              return timelineHours.map((hour) => {
-                const activeShifts = shiftsForDate.filter((s) => isHourInTimeStr(hour, s.time));
-                let showDeficit = 0;
-                let demand = 0;
-                if (role === 'manager') {
-                  demand = getDemandForHour(hour, isWeekend, timeBlockDemands);
-                  showDeficit = Math.max(0, demand - activeShifts.length);
-                }
+              const categories = [
+                { id: '早班', title: '早班時段', icon: <Clock size={18} strokeWidth={2.5} />, bg: 'bg-blue-50', border: 'border-blue-100', text: 'text-blue-800', badgeBg: 'bg-blue-200/50', badgeText: 'text-blue-800' },
+                { id: '晚班', title: '晚班時段', icon: <Clock size={18} strokeWidth={2.5} />, bg: 'bg-indigo-50', border: 'border-indigo-100', text: 'text-indigo-800', badgeBg: 'bg-indigo-200/50', badgeText: 'text-indigo-800' },
+                { id: '留守', title: '留守時段', icon: <ShieldCheck size={18} strokeWidth={2.5} />, bg: 'bg-orange-50', border: 'border-orange-100', text: 'text-orange-800', badgeBg: 'bg-orange-200/50', badgeText: 'text-orange-800' }
+              ];
+
+              return categories.map(cat => {
+                const catShifts = shiftsForDate.filter(s => {
+                  const sCat = s.shiftCategory || (s.type.includes('晚') ? '晚班' : (s.type.includes('留守') ? '留守' : '早班'));
+                  return sCat === cat.id;
+                });
+
+                const roles = {};
+                catShifts.forEach(s => {
+                  if (!roles[s.type]) roles[s.type] = [];
+                  roles[s.type].push(s);
+                });
+
+                if (catShifts.length === 0) return null;
 
                 return (
-                  <div key={hour} className="flex items-start gap-5 py-3.5 relative">
-                    <div className="w-10 text-right shrink-0 pt-1 relative z-10 bg-white">
-                      <span className="text-xs font-black text-gray-400">{hour}:00</span>
+                  <div key={cat.id} className={`${cat.bg} border ${cat.border} rounded-[1.5rem] p-4 shadow-[0_4px_15px_rgba(0,0,0,0.02)] transition-transform`}>
+                    <div className={`flex items-center gap-2 mb-3 ${cat.text}`}>
+                      {cat.icon}
+                      <h4 className="font-extrabold text-[15px] tracking-wide">{cat.title}</h4>
+                      <span className={`ml-auto text-[11px] font-bold px-2.5 py-0.5 rounded-lg ${cat.badgeBg} ${cat.badgeText}`}>
+                        共 {catShifts.length} 人
+                      </span>
                     </div>
-                    <div className="absolute left-[2.8rem] top-4.5 -translate-x-1/2 w-[9px] h-[9px] rounded-full bg-gray-200 ring-4 ring-white z-10"></div>
 
-                    <div className="flex-1 flex flex-col pl-3 pb-1">
-                      {activeShifts.length > 0 ? (
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {activeShifts.map((shift) => (
-                            <div key={shift.id} className="bg-white border border-gray-100 text-[#111] px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
-                              <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
-                                <User size={12} strokeWidth={2.5} />
-                              </div>
-                              <div className="flex flex-col items-start text-left">
-                                <span className="text-[9px] opacity-60 leading-none mb-0.5 max-w-[140px] truncate">{shift.type}</span>
-                                <div className="flex items-center leading-none">
-                                  <span className="truncate">{shift.assignee}</span>
-                                  {getUserTypeBadge(shift.assignee)}
+                    <div className="flex flex-col gap-2.5">
+                      {Object.keys(roles).map(roleName => (
+                        <div key={roleName} className="bg-white rounded-xl p-3 border border-white shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+                          <span className="text-[11px] font-bold text-gray-400 mb-2 block border-b border-gray-50 pb-1.5 flex items-center gap-1.5">
+                            <Briefcase size={12}/> {roleName}
+                          </span>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {roles[roleName].map(shift => (
+                              <div key={shift.id} className="flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-1.5 rounded-xl border border-gray-100">
+                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-white text-gray-500 shadow-sm">
+                                  <User size={12} strokeWidth={2.5} />
                                 </div>
+                                <span className="text-sm font-extrabold text-gray-800">{shift.assignee}</span>
+                                {getUserTypeBadge(shift.assignee)}
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="pt-1 mb-2">
-                          <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">— 該時段無人 —</span>
-                        </div>
-                      )}
-
-                      {role === 'manager' && (
-                        <div className="flex items-center justify-between bg-gray-50 rounded-2xl px-4 py-3 mt-1 mb-3 w-full border border-gray-100 shadow-sm">
-                          <div className="flex items-center gap-2 text-gray-600 font-bold text-[13px]">
-                            <Users size={16} className="text-blue-500" /> 應到總共 {demand} 人
+                            ))}
                           </div>
-                          {showDeficit > 0 ? (
-                            <div className="flex items-center gap-1.5 text-red-500 font-bold text-[13px]">
-                              <AlertCircle size={16} /> 缺 {showDeficit} 人
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1.5 text-green-600 font-bold text-[13px]">
-                              <CheckCircle size={16} /> 人手充足
-                            </div>
-                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   </div>
                 );
@@ -741,7 +801,7 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                 <h3 className="text-xl font-bold text-[#111]">審核請假申請</h3>
                 <p className="text-xs text-gray-500 font-bold mt-0.5">請確認人手是否充足</p>
               </div>
-            </div>
+             </div>
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
               {pendingLeaves.map((p, idx) => (
                 <div key={idx} className="flex justify-between items-center bg-gray-50 p-4 rounded-2xl border border-gray-100">
@@ -750,16 +810,16 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                       <span className="font-bold text-sm text-gray-800">{p.emp}</span>
                       <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded font-bold">待審核</span>
                     </div>
-                    <span className="text-xs text-gray-500 font-bold flex items-center gap-1"><CalendarIcon size={12} /> {p.date} 申請休假</span>
+                   <span className="text-xs text-gray-500 font-bold flex items-center gap-1"><CalendarIcon size={12} /> {p.date.split('/')[1]}/{p.date.split('/')[2]} 申請休假</span>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => onApproveLeave(p.emp, p.date)} className="w-10 h-10 rounded-full bg-green-50 text-green-600 flex items-center justify-center hover:bg-green-100 transition shadow-sm"><CheckCircle size={18} strokeWidth={2.5} /></button>
-                    <button onClick={() => onRejectLeave(p.emp, p.date)} className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition shadow-sm"><XCircle size={18} strokeWidth={2.5} /></button>
+                     <button onClick={() => onRejectLeave(p.emp, p.date)} className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition shadow-sm"><XCircle size={18} strokeWidth={2.5} /></button>
                   </div>
                 </div>
               ))}
               {pendingLeaves.length === 0 && <div className="text-center py-6 text-gray-400 font-bold text-sm">目前沒有待審核的假單！</div>}
-            </div>
+             </div>
             <button onClick={() => setShowApprovalModal(false)} className="mt-6 w-full py-3.5 rounded-2xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">完成並關閉</button>
           </div>
         </div>
@@ -768,13 +828,36 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
   );
 }
 
-function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlockDemands, onAddShift, onRemoveShift, onAutoSchedule, onBack, ruleEnabled, monthlyLeaveDays }) {
-  const [selectedDate, setSelectedDate] = useState('3/1');
+function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlockDemands, onAddShift, onRemoveShift, onAutoSchedule, onBack, ruleEnabled, leaveSettings, announcement, onNavigate }) {
+  const [viewYear, setViewYear] = useState(leaveSettings?.year || 2026);
+  const [viewMonth, setViewMonth] = useState(leaveSettings?.month || 3);
+  
+  useEffect(() => {
+    setViewYear(leaveSettings?.year || 2026);
+    setViewMonth(leaveSettings?.month || 3);
+  }, [leaveSettings?.year, leaveSettings?.month]);
+
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const [selectedDate, setSelectedDate] = useState(`${leaveSettings?.year || 2026}/${leaveSettings?.month || 3}/1`);
   const [activeTab, setActiveTab] = useState('早班'); 
   const [showToast, setShowToast] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const marchDays = Array.from({ length: 31 }, (_, i) => i + 1);
+  useEffect(() => {
+    setSelectedDate(`${viewYear}/${viewMonth}/1`);
+  }, [viewYear, viewMonth]);
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(v => v - 1); }
+    else setViewMonth(v => v - 1);
+  };
+
+  const handleNextMonth = () => {
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(v => v + 1); }
+    else setViewMonth(v => v + 1);
+  };
 
   const dayShifts = shifts.filter((s) => s.date === selectedDate);
 
@@ -824,6 +907,12 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
     setTimeout(() => setShowToast(false), 3500);
   };
 
+  const groupedAssignedShifts = {};
+  assignedShifts.forEach(s => {
+    if (!groupedAssignedShifts[s.type]) groupedAssignedShifts[s.type] = [];
+    groupedAssignedShifts[s.type].push(s);
+  });
+
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f5f6f8] pb-32 animate-in slide-in-from-right-8 duration-300 relative">
       <header className="sticky top-0 bg-[#f5f6f8]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-4 border-b border-gray-200/50">
@@ -843,22 +932,52 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
       </div>
 
       <div className="bg-white mx-8 mt-6 rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+        <div className="flex justify-between items-end mb-4">
+          <div>
+            <h2 className="text-lg font-extrabold text-[#111] tracking-tight">{viewMonth}月份班表</h2>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">{viewYear}</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handlePrevMonth} className="w-7 h-7 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronLeft size={14} strokeWidth={2.5} /></button>
+            <button onClick={handleNextMonth} className="w-7 h-7 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-full transition"><ChevronRight size={14} strokeWidth={2.5} /></button>
+          </div>
+        </div>
         <div className="grid grid-cols-7 gap-x-2 gap-y-3">
           {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
             <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
           ))}
-          {marchDays.map((day) => {
-            const dateStr = `3/${day}`;
+          {viewDays.map((day) => {
+            const dateStr = `${viewYear}/${viewMonth}/${day}`;
+            const info = getDayInfo(viewYear, viewMonth, day);
             const isSelected = selectedDate === dateStr;
             const hasShift = shifts.some((s) => s.date === dateStr);
+
+            let btnClass = 'bg-gray-50 text-gray-600 hover:bg-gray-100';
+            if (isSelected) btnClass = 'bg-[#111] text-white shadow-lg transform scale-110 z-10';
+            else if (info.isOffDay) btnClass = 'bg-red-50/30 text-red-500';
+
             return (
-              <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 font-bold text-sm ${isSelected ? 'bg-[#111] text-white shadow-lg transform scale-110 z-10' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
-                {day}
+              <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 font-bold text-sm ${btnClass}`}>
+                <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : info.isWeekend ? 'text-orange-500' : '')}`}>{day}</span>
+                {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 {hasShift && !isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                 {hasShift && isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
               </button>
             );
           })}
+        </div>
+      </div>
+
+      <div className="px-8 mt-6">
+        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl shadow-sm relative group">
+           <button onClick={() => onNavigate('backend_settings')} className="absolute top-2 right-2 p-1.5 text-blue-400 hover:bg-blue-100 hover:text-blue-600 rounded-full transition-colors" title="前往後台設定編輯">
+             <Settings size={16} />
+           </button>
+           <p className="text-xs font-bold text-blue-800 leading-relaxed text-center px-4">
+             {announcement.split('\n').map((line, i) => (
+                <span key={i}>{line}<br /></span>
+              ))}
+           </p>
         </div>
       </div>
 
@@ -876,55 +995,89 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         </div>
       </div>
 
-      <div className="px-8 mt-6">
-        <div className="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50 min-h-[120px]">
-          <h3 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-1.5"><CheckCircle size={14} className="text-blue-500"/> {activeTab} - 已排班人員</h3>
-          {assignedShifts.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {assignedShifts.map(s => (
-                <div key={s.id} className="bg-blue-50 border border-blue-100 text-blue-800 px-3 py-2 rounded-xl flex items-center gap-2 shadow-sm animate-in zoom-in duration-200">
-                  <span className="text-sm font-black tracking-wide">{s.assignee}</span>
-                  <button onClick={() => onRemoveShift(s.id)} className="text-blue-400 hover:text-blue-600 bg-white rounded-full p-0.5 transition-colors shadow-sm"><XCircle size={14}/></button>
+      <div className="px-8 mt-6 flex flex-col gap-4">
+        <div className="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center justify-between border-b border-gray-50 pb-2 mb-4">
+            <h3 className="text-xs font-bold text-gray-500 flex items-center gap-1.5">
+              <CheckCircle size={14} className="text-blue-500"/> {activeTab} - 已排班人員
+            </h3>
+            {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isHoliday && (
+               <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-md border border-red-100">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName}
+               </span>
+            )}
+          </div>
+          
+          {Object.keys(groupedAssignedShifts).length > 0 ? (
+            <div className="flex flex-col gap-4">
+              {Object.keys(groupedAssignedShifts).map((roleName) => (
+                <div key={roleName} className="flex flex-col gap-2.5">
+                   <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
+                     <Briefcase size={12}/> {roleName}
+                     <div className="h-px bg-gray-100 flex-1 ml-2"></div>
+                   </div>
+                   <div className="flex flex-wrap gap-2.5">
+                    {groupedAssignedShifts[roleName].map(s => {
+                      const isPartTime = s.type.includes('兼職');
+                      return (
+                        <div key={s.id} className={`border px-3 py-2 rounded-xl flex items-center gap-2.5 shadow-sm animate-in zoom-in duration-200 transition-colors ${isPartTime ? 'bg-orange-50 border-orange-100 text-orange-800 hover:bg-orange-100' : 'bg-blue-50 border-blue-100 text-blue-800 hover:bg-blue-100'}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-white shadow-sm border ${isPartTime ? 'text-orange-400 border-orange-100' : 'text-blue-400 border-blue-100'}`}>
+                            <User size={14} strokeWidth={2.5} />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={`text-[9px] font-bold leading-none mb-0.5 ${isPartTime ? 'text-orange-500' : 'text-blue-500'}`}>{s.type}</span>
+                            <span className="text-sm font-black tracking-wide leading-none">{s.assignee}</span>
+                          </div>
+                          <button onClick={() => onRemoveShift(s.id)} className={`hover:scale-110 rounded-full p-1 transition-all ml-1 ${isPartTime ? 'text-orange-400 hover:text-orange-600 hover:bg-orange-200/50' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-200/50'}`} title="移除人員">
+                            <XCircle size={16} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 font-bold py-2 ml-1">目前無人安排在{activeTab}</p>
+            <div className="min-h-[80px] flex flex-col items-center justify-center gap-2">
+               <Coffee size={24} className="text-gray-300" />
+               <p className="text-sm text-gray-400 font-bold">目前無人安排在 {activeTab}</p>
+            </div>
           )}
         </div>
+      </div>
 
-        <div className="mt-8">
-          <h3 className="text-xs font-bold text-gray-400 mb-3 ml-1 flex items-center gap-1.5"><Plus size={14} className="text-gray-500"/> 點擊新增至 {activeTab}</h3>
-          {availableUsers.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {availableUsers.map(u => (
-                <button key={u.id} onClick={() => onAddShift(selectedDate, activeTab, u.name)} className="bg-white border border-gray-200 text-gray-700 hover:border-blue-500 hover:text-blue-600 px-3 py-2 rounded-xl flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all active:scale-95 group">
-                  <span className="font-bold text-sm">{u.name}</span>
-                  <span className="text-[10px] text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-600 bg-gray-100 px-1.5 py-0.5 rounded font-bold transition-colors">{u.role}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-400 font-bold ml-1 bg-gray-100 px-4 py-3 rounded-xl border border-dashed border-gray-300 inline-block">無符合班別或可排班之人員</p>
-          )}
-        </div>
-        
-        {usersOnLeave.length > 0 && (
-          <div className="mt-8 bg-orange-50/50 border border-orange-100 p-4 rounded-2xl">
-            <h3 className="text-xs font-bold text-orange-600 mb-3 flex items-center gap-1.5"><AlertCircle size={14}/> 今日休假人員 (不可排班)</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {usersOnLeave.map(u => (
-                <span key={u.id} className="text-xs font-bold text-orange-800 bg-orange-100 px-2 py-1 rounded-lg border border-orange-200">{u.name}</span>
-              ))}
-            </div>
+      <div className="mt-8 px-8">
+        <h3 className="text-xs font-bold text-gray-400 mb-3 ml-1 flex items-center gap-1.5"><Plus size={14} className="text-gray-500"/> 點擊新增至 {activeTab}</h3>
+        {availableUsers.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {availableUsers.map(u => (
+              <button key={u.id} onClick={() => onAddShift(selectedDate, activeTab, u.name)} className="bg-white border border-gray-200 text-gray-700 hover:border-blue-500 hover:text-blue-600 px-3 py-2 rounded-xl flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all active:scale-95 group">
+                <span className="font-bold text-sm">{u.name}</span>
+                <span className="text-[10px] text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-600 bg-gray-100 px-1.5 py-0.5 rounded font-bold transition-colors">{u.role}</span>
+              </button>
+            ))}
           </div>
+        ) : (
+          <p className="text-sm text-gray-400 font-bold ml-1 bg-gray-100 px-4 py-3 rounded-xl border border-dashed border-gray-300 inline-block">無符合班別或可排班之人員</p>
         )}
       </div>
+        
+      {usersOnLeave.length > 0 && (
+        <div className="px-8 mt-8 bg-orange-50/50 border border-orange-100 p-4 rounded-2xl mx-8">
+          <h3 className="text-xs font-bold text-orange-600 mb-3 flex items-center gap-1.5"><AlertCircle size={14}/> 今日休假人員 (不可排班)</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {usersOnLeave.map(u => (
+              <span key={u.id} className="text-xs font-bold text-orange-800 bg-orange-100 px-2 py-1 rounded-lg border border-orange-200">{u.name}</span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectLeave }) {
+function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectLeave, onApproveAll, onRejectAll }) {
   const pendingByDate = {};
   Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
     leaves.filter(l => l.status === 'pending').forEach(l => {
@@ -934,9 +1087,9 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   });
 
   const sortedDates = Object.keys(pendingByDate).sort((a, b) => {
-    const d1 = parseInt(a.split('/')[1]);
-    const d2 = parseInt(b.split('/')[1]);
-    return d1 - d2;
+    const [y1, m1, d1] = a.split('/').map(Number);
+    const [y2, m2, d2] = b.split('/').map(Number);
+    return new Date(y1, m1 - 1, d1) - new Date(y2, m2 - 1, d2);
   });
 
   return (
@@ -954,6 +1107,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
           <div className="space-y-5">
             {sortedDates.map((date) => {
               const emps = pendingByDate[date];
+              const [y, m, d] = date.split('/');
               return (
                 <div key={date} className="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-100 flex flex-col gap-3 animate-in fade-in zoom-in-95 duration-200 overflow-hidden relative">
                   <div className="absolute top-0 left-0 w-1.5 h-full bg-orange-400 rounded-l-[1.5rem]"></div>
@@ -961,11 +1115,15 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
                   <div className="flex items-center justify-between border-b border-gray-50 pb-3 ml-2">
                     <div className="flex items-center gap-2">
                       <CalendarIcon size={18} className="text-orange-500" />
-                      <span className="font-extrabold text-lg text-[#111]">{date}</span>
+                      <span className="font-extrabold text-lg text-[#111]">{m}/{d}</span>
+                      <span className="text-[10px] text-orange-700 bg-orange-50 px-2.5 py-1 rounded-lg font-bold border border-orange-100 ml-1">
+                        共 {emps.length} 人申請
+                      </span>
                     </div>
-                    <span className="text-[11px] text-orange-700 bg-orange-50 px-2.5 py-1 rounded-lg font-bold border border-orange-100">
-                      共 {emps.length} 人申請
-                    </span>
+                    <div className="flex gap-2">
+                       <button onClick={() => onRejectAll(date)} className="text-[11px] font-bold text-red-500 bg-red-50 px-2.5 py-1.5 rounded-lg hover:bg-red-100 transition-colors active:scale-95 shadow-sm">全駁回</button>
+                       <button onClick={() => onApproveAll(date)} className="text-[11px] font-bold text-white bg-[#111] px-2.5 py-1.5 rounded-lg hover:bg-gray-800 transition-colors active:scale-95 shadow-sm">全核准</button>
+                    </div>
                   </div>
 
                   <div className="flex gap-3 overflow-x-auto no-scrollbar pt-1 pb-2 ml-2 -mr-5 pr-5">
@@ -998,7 +1156,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   );
 }
 
-function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onUpdateEmployee, onDeleteEmployee }) {
+function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave }) {
   const [filterShift, setFilterShift] = useState('全部');
   const [filterPosition, setFilterPosition] = useState('全部');
 
@@ -1069,7 +1227,12 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onU
       <div className="px-8 mt-4 space-y-4">
         {filteredUsers.length > 0 ? (
           filteredUsers.map((user) => (
-            <EmployeeEditCard key={user.id} user={user} allUsers={registeredUsers} userLeaves={employeeLeaves[user.name] || []} onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} />
+            <EmployeeEditCard 
+              key={user.id} user={user} allUsers={registeredUsers} 
+              userLeaves={employeeLeaves[user.name] || []} leaveSettings={leaveSettings}
+              onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} 
+              onAddLeave={onAddLeave} onRemoveLeave={onRemoveLeave}
+            />
           ))
         ) : (
           <div className="text-center py-10 bg-white rounded-[1.5rem] border border-dashed border-gray-200">
@@ -1082,19 +1245,22 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, onU
   );
 }
 
-function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves, announcement, onLogout }) {
+function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings, onSaveLeaves, announcement, onLogout }) {
   const initialLeaves = employeeLeaves[currentUser] || [];
   const [selectedLeaves, setSelectedLeaves] = useState(initialLeaves);
   const [isSubmitted, setIsSubmitted] = useState(false); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [warningMsg, setWarningMsg] = useState('');
 
-  const MAX_LEAVES = 8;
-  const MAX_WEEKEND_LEAVES = 1;
-  const MAX_WEEKDAY_LEAVES = 7;
+  const targetYear = leaveSettings?.year || 2026;
+  const targetMonth = leaveSettings?.month || 3;
+  const MAX_LEAVES = leaveSettings?.total || 8;
+  const MAX_WEEKEND_LEAVES = leaveSettings?.weekend || 1;
+  const MAX_WEEKDAY_LEAVES = leaveSettings?.weekday || 7;
   const APPROVAL_THRESHOLD = 1; 
 
-  const marchDays = Array.from({ length: 31 }, (_, i) => i + 1);
+  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+  const marchDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   const othersLeaves = {};
   Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
@@ -1103,7 +1269,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
 
   const handleDayClick = (day) => {
     if (isSubmitted) return;
-    const dateStr = `3/${day}`;
+    const dateStr = `${targetYear}/${targetMonth}/${day}`;
 
     const existingIndex = selectedLeaves.findIndex(l => l.date === dateStr);
     if (existingIndex >= 0) {
@@ -1112,22 +1278,36 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
       return;
     }
 
-    const isWknd = isWeekendDay(day);
-    const currentWkndCount = selectedLeaves.filter((l) => isWeekendDay(parseInt(l.date.split('/')[1]))).length;
-    const currentWkdyCount = selectedLeaves.filter((l) => !isWeekendDay(parseInt(l.date.split('/')[1]))).length;
+    const info = getDayInfo(targetYear, targetMonth, day);
+    
+    // 計算目前已選的天數 (針對當前的 targetMonth)
+    const currentOffDayCount = selectedLeaves.filter(l => {
+      const [y, m, d] = l.date.split('/').map(Number);
+      return y === targetYear && m === targetMonth && getDayInfo(y, m, d).isOffDay;
+    }).length;
+    
+    const currentWorkDayCount = selectedLeaves.filter(l => {
+      const [y, m, d] = l.date.split('/').map(Number);
+      return y === targetYear && m === targetMonth && !getDayInfo(y, m, d).isOffDay;
+    }).length;
 
-    if (isWknd && currentWkndCount >= MAX_WEEKEND_LEAVES) {
-      setWarningMsg(`您最多只能選擇 ${MAX_WEEKEND_LEAVES} 天「假日」排休`);
+    const currentTotalForMonth = selectedLeaves.filter(l => {
+      const [y, m] = l.date.split('/').map(Number);
+      return y === targetYear && m === targetMonth;
+    }).length;
+
+    if (info.isOffDay && currentOffDayCount >= MAX_WEEKEND_LEAVES) {
+      setWarningMsg(`本月最多只能選擇 ${MAX_WEEKEND_LEAVES} 天「假日/連假」排休`);
       setTimeout(() => setWarningMsg(''), 3000);
       return;
     }
-    if (!isWknd && currentWkdyCount >= MAX_WEEKDAY_LEAVES) {
-      setWarningMsg(`您最多只能選擇 ${MAX_WEEKDAY_LEAVES} 天「平日」排休`);
+    if (!info.isOffDay && currentWorkDayCount >= MAX_WEEKDAY_LEAVES) {
+      setWarningMsg(`本月最多只能選擇 ${MAX_WEEKDAY_LEAVES} 天「平日」排休`);
       setTimeout(() => setWarningMsg(''), 3000);
       return;
     }
-    if (selectedLeaves.length >= MAX_LEAVES) {
-      setWarningMsg(`您已達自選排休上限 (${MAX_LEAVES}天)`);
+    if (currentTotalForMonth >= MAX_LEAVES) {
+      setWarningMsg(`您已達本月自選排休上限 (${MAX_LEAVES}天)`);
       setTimeout(() => setWarningMsg(''), 3000);
       return;
     }
@@ -1152,27 +1332,32 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
     setShowConfirmModal(false);
   };
 
+  const monthLeavesCount = selectedLeaves.filter(l => {
+    const [y, m] = l.date.split('/').map(Number);
+    return y === targetYear && m === targetMonth;
+  }).length;
+
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f8f9fc] pb-[150px] animate-in fade-in slide-in-from-right-8 duration-300 relative flex flex-col">
       {warningMsg && (
-        <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 w-11/12 max-w-[320px]">
-          <div className={`text-white px-5 py-2.5 rounded-2xl shadow-lg font-bold text-sm flex items-center justify-center gap-2 text-center leading-snug ${warningMsg.includes('主管審核') ? 'bg-orange-500' : 'bg-red-500'}`}>
-            <AlertCircle size={18} className="shrink-0" /> {warningMsg}
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-4 w-11/12 max-w-[320px]">
+          <div className={`text-white px-5 py-3 rounded-2xl shadow-2xl font-bold text-sm flex items-center justify-center gap-2 text-center leading-snug ${warningMsg.includes('主管審核') ? 'bg-orange-500' : 'bg-red-500'}`}>
+            <AlertCircle size={20} className="shrink-0" /> {warningMsg}
           </div>
         </div>
       )}
       
       <header className="shrink-0 sticky top-0 bg-[#f8f9fc]/90 backdrop-blur-md z-10 flex items-center justify-between px-8 pt-12 pb-4 border-b border-gray-200/50">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">本月排休</h1>
-          <p className="text-xs font-semibold text-gray-500 mt-0.5">{currentUser} {isSubmitted ? ' - 假單已鎖定' : ` - 已選 ${selectedLeaves.length} 天 (規定自選 ${MAX_LEAVES} 天)`}</p>
+          <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">{targetMonth}月份排休</h1>
+          <p className="text-xs font-semibold text-gray-500 mt-0.5">{currentUser} {isSubmitted ? ' - 假單已鎖定' : ` - 已選 ${monthLeavesCount} 天 (上限 ${MAX_LEAVES} 天)`}</p>
         </div>
         <button onClick={onLogout} className="w-10 h-10 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-full flex items-center justify-center transition shadow-sm active:scale-95" title="安全登出">
           <LogOut size={16} strokeWidth={2.5} />
         </button>
       </header>
 
-      <div className="px-8 mt-6 flex-1">
+      <div className="px-8 mt-6 flex-1 pb-[120px]">
         <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-6 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
           <p className="text-xs font-bold text-blue-800 leading-relaxed text-center">
              {announcement.split('\n').map((line, i) => (
@@ -1197,11 +1382,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
 
         <div className="mb-6">
           <div className="flex justify-between text-sm font-bold text-[#111] mb-2">
-            <span>自選進度 (最多{MAX_WEEKEND_LEAVES}假日, {MAX_WEEKDAY_LEAVES}平日)</span>
-            <span className={selectedLeaves.length === MAX_LEAVES ? 'text-green-600' : 'text-blue-600'}>{selectedLeaves.length} / {MAX_LEAVES} 天</span>
+            <span>本月自選 (最多 {MAX_WEEKEND_LEAVES} 假日, {MAX_WEEKDAY_LEAVES} 平日)</span>
+            <span className={monthLeavesCount === MAX_LEAVES ? 'text-green-600' : 'text-blue-600'}>{monthLeavesCount} / {MAX_LEAVES} 天</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
-            <div className={`h-2 rounded-full transition-all duration-300 ${selectedLeaves.length === MAX_LEAVES ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${Math.min((selectedLeaves.length / MAX_LEAVES) * 100, 100)}%` }}></div>
+            <div className={`h-2 rounded-full transition-all duration-300 ${monthLeavesCount === MAX_LEAVES ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${Math.min((monthLeavesCount / MAX_LEAVES) * 100, 100)}%` }}></div>
           </div>
         </div>
 
@@ -1211,11 +1396,12 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
               <div key={d} className={`text-center text-[10px] font-bold mb-2 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
             ))}
             {marchDays.map((day) => {
-              const dateStr = `3/${day}`;
+              const dateStr = `${targetYear}/${targetMonth}/${day}`;
               const myLeave = selectedLeaves.find((l) => l.date === dateStr);
               const bookedCount = othersLeaves[dateStr] || 0;
               const isFull = bookedCount >= APPROVAL_THRESHOLD;
-              const isWknd = isWeekendDay(day);
+              
+              const info = getDayInfo(targetYear, targetMonth, day);
 
               let btnClass = 'bg-gray-50 text-gray-600 border border-gray-100 hover:bg-gray-100';
               if (myLeave) {
@@ -1224,24 +1410,21 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
                 btnClass = 'bg-red-50 text-red-500 border border-red-100 font-bold';
               } else if (bookedCount > 0) {
                 btnClass = 'bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 font-bold';
+              } else if (info.isOffDay) {
+                btnClass = 'bg-red-50/30 text-red-500 hover:bg-red-100 border-transparent';
               }
 
               return (
                 <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass}`}>
-                  <span className={`text-[14px] ${isWknd && !myLeave && !isFull ? 'text-orange-600' : ''}`}>{day}</span>
-                  {isWknd && !myLeave && !isFull && <div className="absolute top-1 right-1 w-1 h-1 bg-orange-400 rounded-full"></div>}
+                  <span className={`text-[14px] ${info.isOffDay && !myLeave && !isFull ? 'text-red-500 font-bold' : ''}`}>{day}</span>
+                  {info.isHoliday && !myLeave && !isFull && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 </button>
               );
             })}
           </div>
         </div>
 
-        <div className="h-32 w-full shrink-0"></div>
-
-      </div>
-
-      <div className="fixed sm:absolute bottom-[72px] left-0 w-full px-8 pb-6 pt-12 bg-gradient-to-t from-[#f8f9fc] via-[#f8f9fc]/90 to-transparent z-40 pointer-events-none">
-        <div className="pointer-events-auto">
+        <div className="w-full">
           {isSubmitted ? (
             <div className="w-full bg-green-50 text-green-600 py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm border border-green-100">
               <CheckCircle size={20} /> 假單已送出
@@ -1253,10 +1436,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
                 selectedLeaves.length > 0 ? 'bg-[#2563EB] text-white shadow-blue-600/30 hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
               }`}
             >
-              發送假單 ({selectedLeaves.length} / {MAX_LEAVES} 天)
+              發送假單 ({monthLeavesCount} / {MAX_LEAVES} 天)
             </button>
           )}
         </div>
+
       </div>
 
       {showConfirmModal && (
@@ -1266,7 +1450,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
             <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-4"><AlertCircle size={24} /></div>
             <h3 className="text-xl font-bold text-[#111] mb-2">確定送出排休假單？</h3>
             <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-              您目前已自選 <strong className="text-gray-800">{selectedLeaves.length}</strong> 天假。
+              您本月已自選 <strong className="text-gray-800">{monthLeavesCount}</strong> 天假。
               {selectedLeaves.some(l => l.status === 'pending') && <span className="text-orange-500 font-bold block mt-1"> 包含待審核的假單，須經主管同意。</span>}
             </p>
             <div className="flex gap-3">
@@ -1280,26 +1464,44 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, onSaveLeaves,
   );
 }
 
-function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLeaveDays, setMonthlyLeaveDays, dailyWorkHours, setDailyWorkHours, timeBlockDemands, setTimeBlockDemands, announcement, onUpdateAnnouncement }) {
+function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement }) {
   const [localAnnouncement, setLocalAnnouncement] = useState(announcement);
-  const [showSavedToast, setShowSavedToast] = useState(false);
+  const [localLeaveSettings, setLocalLeaveSettings] = useState(leaveSettings || { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
 
-  const updateRequiredCount = (id, delta, isWeekend) => {
-    setTimeBlockDemands((prev) =>
-      prev.map((s) => {
-        if (s.id === id) {
-          if (isWeekend) return { ...s, reqWeekend: Math.max(0, s.reqWeekend + delta) };
-          else return { ...s, reqWeekday: Math.max(0, s.reqWeekday + delta) };
-        }
-        return s;
-      })
-    );
+  useEffect(() => {
+    if (leaveSettings) setLocalLeaveSettings(leaveSettings);
+  }, [leaveSettings]);
+
+  const handleSyncGov = () => {
+    setIsSyncing(true);
+    setTimeout(() => {
+      const y = localLeaveSettings.year;
+      const m = localLeaveSettings.month;
+      let offDaysCount = 0;
+      const daysInM = new Date(y, m, 0).getDate();
+      for(let d=1; d<=daysInM; d++) {
+        if (getDayInfo(y, m, d).isOffDay) offDaysCount++;
+      }
+      
+      setLocalLeaveSettings(prev => ({
+        ...prev,
+        total: offDaysCount,
+        weekend: Math.min(offDaysCount, 4), // 預設安全配額
+        weekday: Math.max(offDaysCount - Math.min(offDaysCount, 4), 0)
+      }));
+      setIsSyncing(false);
+      setToastMsg(`已載入 ${m}月 國定額度 (${offDaysCount}天)`);
+      setTimeout(() => setToastMsg(''), 3000);
+    }, 800);
   };
 
-  const handleSaveAnnouncement = () => {
+  const handleSaveAll = () => {
     onUpdateAnnouncement(localAnnouncement);
-    setShowSavedToast(true);
-    setTimeout(() => setShowSavedToast(false), 3000);
+    onUpdateLeaveSettings(localLeaveSettings);
+    setToastMsg('設定已全面儲存並發佈');
+    setTimeout(() => setToastMsg(''), 3000);
   };
 
   return (
@@ -1314,9 +1516,57 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLea
 
       <div className="px-8 mt-6 space-y-6">
         
-        {/* 新增的公告編輯區塊 */}
+        {/* 排休天數與限制 (連動行政院行事曆) */}
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
-          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4">
+          <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-4">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600"><CalendarIcon size={20} strokeWidth={2.5} /></div>
+                <div>
+                   <h3 className="font-bold text-[#111] text-lg">排班目標與限制</h3>
+                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Schedule Target</p>
+                </div>
+             </div>
+             <button onClick={handleSyncGov} disabled={isSyncing} className="flex items-center gap-1.5 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl hover:bg-indigo-100 transition-colors active:scale-95 shadow-sm">
+                <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? '同步中...' : '同步行政院'}
+             </button>
+          </div>
+
+          <div className="flex items-center gap-3 mb-4">
+             <select value={localLeaveSettings.year} onChange={e => setLocalLeaveSettings({...localLeaveSettings, year: parseInt(e.target.value)})} className="appearance-none bg-gray-50 font-bold text-sm py-2.5 pl-4 pr-8 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_10px_center]">
+               <option value={2026}>2026 年</option>
+               <option value={2027}>2027 年</option>
+             </select>
+             <select value={localLeaveSettings.month} onChange={e => setLocalLeaveSettings({...localLeaveSettings, month: parseInt(e.target.value)})} className="appearance-none bg-gray-50 font-bold text-sm py-2.5 pl-4 pr-8 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_10px_center] flex-1">
+               {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{m} 月份</option>)}
+             </select>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mb-5">
+             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">總休假數</label>
+                <div className="flex items-end gap-1">
+                   <input type="number" value={localLeaveSettings.total} onChange={e => setLocalLeaveSettings({...localLeaveSettings, total: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
+                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+                </div>
+             </div>
+             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">假日上限</label>
+                <div className="flex items-end gap-1">
+                   <input type="number" value={localLeaveSettings.weekend} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekend: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
+                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+                </div>
+             </div>
+             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
+                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">平日上限</label>
+                <div className="flex items-end gap-1">
+                   <input type="number" value={localLeaveSettings.weekday} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekday: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
+                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+                </div>
+             </div>
+          </div>
+
+          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4 pt-2">
              <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600"><AlignLeft size={20} strokeWidth={2.5} /></div>
              <div>
                 <h3 className="font-bold text-[#111] text-lg">排休系統公告</h3>
@@ -1326,15 +1576,16 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLea
           <textarea
             value={localAnnouncement}
             onChange={(e) => setLocalAnnouncement(e.target.value)}
-            className="w-full bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none leading-relaxed transition-all resize-none"
+            className="w-full bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-green-500 outline-none leading-relaxed transition-all resize-none shadow-sm"
             rows={4}
             placeholder="請輸入要在員工排休畫面上方顯示的公告..."
           />
+
           <button 
-            onClick={handleSaveAnnouncement} 
-            className="mt-3 w-full py-3.5 bg-[#111] text-white rounded-xl font-bold shadow-sm shadow-black/10 hover:bg-gray-800 transition-colors flex justify-center items-center gap-2 active:scale-95"
+            onClick={handleSaveAll} 
+            className="mt-5 w-full py-4 bg-[#111] text-white rounded-2xl font-bold shadow-lg shadow-black/10 hover:bg-gray-800 transition-all flex justify-center items-center gap-2 active:scale-95"
           >
-             {showSavedToast ? <><CheckCircle size={18} className="text-green-400" /> 已發佈至雲端</> : '儲存並發佈公告'}
+             {toastMsg ? <><CheckCircle size={18} className="text-green-400" /> {toastMsg}</> : '儲存所有設定並發佈'}
           </button>
         </div>
 
@@ -1359,7 +1610,7 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLea
           <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-xl mb-4 font-medium leading-relaxed">
             <strong className="text-blue-900 block mb-1"> 七休二 AI 滾動檢查 & 排休邏輯</strong>
             開啟規則後，系統將確保每位員工在<strong className="text-red-500">任意連續 7 天內，最多只能排 5 天班</strong>（必須休 2 天）。<br /><br />
-            另外，每位員工每月<strong className="text-red-500">只能自選 8 天假（1假+7平）</strong>，若發生衝突會轉交主管審核，剩餘假額由系統在符合人力與七休二的情況下為其自動保留。
+            另外，每位員工每月<strong className="text-red-500">只能自選設定額度的假</strong>，若發生衝突會轉交主管審核，剩餘假額由系統在符合人力與七休二的情況下為其自動保留。
           </div>
         </div>
       </div>
@@ -1367,48 +1618,170 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, monthlyLea
   );
 }
 
-function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves }) {
+function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, shifts, leaveSettings }) {
   const user = registeredUsers.find(u => u.name === currentUser);
   if (!user) return null;
 
-  const leaves = employeeLeaves[currentUser] || [];
-  const MAX_LEAVES = 8;
+  const [viewYear, setViewYear] = useState(leaveSettings?.year || 2026);
+  const [viewMonth, setViewMonth] = useState(leaveSettings?.month || 3);
+  
+  useEffect(() => {
+    setViewYear(leaveSettings?.year || 2026);
+    setViewMonth(leaveSettings?.month || 3);
+  }, [leaveSettings?.year, leaveSettings?.month]);
+
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const myLeaves = employeeLeaves[currentUser] || [];
+  const myShifts = shifts.filter(s => s.assignee === currentUser);
+  
+  const [selectedDate, setSelectedDate] = useState(`${leaveSettings?.year || 2026}/${leaveSettings?.month || 3}/1`);
+
+  useEffect(() => {
+    setSelectedDate(`${viewYear}/${viewMonth}/1`);
+  }, [viewYear, viewMonth]);
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(v => v - 1); }
+    else setViewMonth(v => v - 1);
+  };
+
+  const handleNextMonth = () => {
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(v => v + 1); }
+    else setViewMonth(v => v + 1);
+  };
+
+  const selectedShift = myShifts.find(s => s.date === selectedDate);
+  const selectedLeave = myLeaves.find(l => l.date === selectedDate);
 
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f8f9fc] pb-32 animate-in slide-in-from-right-8 duration-300">
       <header className="sticky top-0 bg-[#f8f9fc]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-6 border-b border-gray-200/50">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">個人資料</h1>
-          <p className="text-xs font-semibold text-gray-500 mt-0.5">My Profile</p>
+          <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">我的專屬行事曆</h1>
+          <p className="text-xs font-semibold text-gray-500 mt-0.5">My Schedule</p>
         </div>
       </header>
 
-      <div className="px-8 mt-6">
-        <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 flex items-center gap-4 mb-6">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-inner ${user.role.includes('兼職') ? 'bg-orange-500' : 'bg-blue-600'}`}>
-            {user.name.charAt(0)}
+      <div className="px-8 mt-6 flex flex-col gap-6">
+        {/* 個人資訊卡片 */}
+        <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-inner shrink-0 ${user.role.includes('兼職') ? 'bg-orange-500' : 'bg-blue-600'}`}>
+              {user.name.charAt(0)}
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-xl font-bold text-[#111]">{user.name}</h2>
+              <div className="flex items-center gap-2">
+                 <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${user.role.includes('兼職') ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
+                   {user.role}
+                 </span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-[#111]">{user.name}</h2>
-            <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded font-bold ${user.role.includes('兼職') ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-              {user.role}
-            </span>
+          <div className="flex flex-col items-end gap-1 text-right">
+             <span className="text-[10px] font-bold text-gray-400 flex items-center gap-1"><Lock size={10}/> 登入密碼</span>
+             <span className="text-sm font-bold text-gray-800 tracking-widest">{user.password}</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 mb-6 space-y-5">
-          <div>
-            <label className="text-xs font-bold text-gray-500 flex items-center gap-1.5 mb-2"><Briefcase size={14} /> 系統綁定職位</label>
-            <div className="bg-gray-50 px-4 py-3 rounded-xl font-bold text-gray-800 text-sm border border-gray-100">
-              {user.role}
-            </div>
+        {/* 我的行事曆 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100">
+           <div className="flex items-center justify-between mb-4">
+             <div className="flex items-center gap-2">
+               <h3 className="font-bold text-[#111] text-md">{viewMonth}月 班表</h3>
+               <div className="flex gap-1.5 ml-2">
+                 <button onClick={handlePrevMonth} className="w-6 h-6 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-200 rounded-full transition"><ChevronLeft size={12} strokeWidth={2.5} /></button>
+                 <button onClick={handleNextMonth} className="w-6 h-6 flex items-center justify-center bg-gray-50 text-gray-600 hover:bg-gray-200 rounded-full transition"><ChevronRight size={12} strokeWidth={2.5} /></button>
+               </div>
+             </div>
+             <div className="flex gap-2">
+               <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div><span className="text-[10px] font-bold text-gray-500">上班</span></div>
+               <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div><span className="text-[10px] font-bold text-gray-500">休假</span></div>
+             </div>
+           </div>
+
+           <div className="grid grid-cols-7 gap-x-2 gap-y-3">
+            {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
+              <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
+            ))}
+            {viewDays.map((day) => {
+              const dateStr = `${viewYear}/${viewMonth}/${day}`;
+              const isShift = myShifts.some(s => s.date === dateStr);
+              const leaveInfo = myLeaves.find(l => l.date === dateStr);
+              const isSelected = selectedDate === dateStr;
+              const info = getDayInfo(viewYear, viewMonth, day);
+
+              let btnClass = 'bg-gray-50 text-gray-600 hover:bg-gray-100';
+              if (leaveInfo) {
+                 btnClass = leaveInfo.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-200' : 'bg-green-50 text-green-600 border border-green-200';
+              } else if (isShift) {
+                 btnClass = 'bg-blue-50 text-blue-600 border border-blue-200 font-bold';
+              } else if (info.isOffDay) {
+                 btnClass = 'bg-red-50/30 text-red-500 hover:bg-red-100';
+              }
+
+              return (
+                <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${isSelected ? 'ring-2 ring-[#111] ring-offset-2 transform scale-105 z-10 shadow-md' : ''}`}>
+                  <span className={`text-[14px] font-bold ${info.isHoliday && !leaveInfo && !isShift ? 'text-red-500' : ''}`}>{day}</span>
+                  {info.isHoliday && !leaveInfo && !isShift && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
+                </button>
+              );
+            })}
           </div>
-          <div>
-            <label className="text-xs font-bold text-gray-500 flex items-center gap-1.5 mb-2"><Lock size={14} /> 登入密碼</label>
-            <div className="bg-gray-50 px-4 py-3 rounded-xl font-bold text-gray-800 text-sm border border-gray-100 tracking-widest">
-              {user.password}
-            </div>
-          </div>
+        </div>
+
+        {/* 單日詳細資訊 */}
+        <div className="bg-[#111] text-white rounded-[2rem] p-6 shadow-lg shadow-black/10 relative overflow-hidden mb-4">
+           <div className="absolute -right-4 -top-4 opacity-10 pointer-events-none">
+             <CalendarIcon size={100} />
+           </div>
+           <div className="flex items-center gap-2 mb-4 relative z-10">
+             <h3 className="text-sm font-bold text-gray-400 flex items-center gap-2">
+               <CalendarCheck size={16} /> {selectedDate.split('/')[1]}/{selectedDate.split('/')[2]} 詳細資訊
+             </h3>
+             {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isHoliday && (
+               <span className="text-[10px] font-black text-red-500 bg-red-500/20 px-2 py-0.5 rounded-md border border-red-500/30">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName}
+               </span>
+             )}
+           </div>
+
+           {selectedShift ? (
+             <div className="flex flex-col gap-4 relative z-10">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400"><Briefcase size={20} /></div>
+                 <div>
+                   <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">排定班別</span>
+                   <span className="block text-sm font-bold text-white">{selectedShift.shiftCategory || (selectedShift.type.includes('晚') ? '晚班' : '早班')} ({selectedShift.type})</span>
+                 </div>
+               </div>
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400"><Clock size={20} /></div>
+                 <div>
+                   <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">工作時間</span>
+                   <span className="block text-sm font-bold text-white leading-relaxed">{selectedShift.time.replace(/&/g, ' 與 ')}</span>
+                 </div>
+               </div>
+             </div>
+           ) : selectedLeave ? (
+             <div className="flex items-center gap-4 relative z-10 py-2">
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${selectedLeave.status === 'pending' ? 'bg-orange-500/20 text-orange-400' : 'bg-green-500/20 text-green-400'}`}>
+                  {selectedLeave.status === 'pending' ? <Clock size={24} /> : <CheckCircle size={24} />}
+                </div>
+                <div>
+                   <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">休假狀態</span>
+                   <span className={`block text-lg font-bold ${selectedLeave.status === 'pending' ? 'text-orange-400' : 'text-green-400'}`}>
+                     {selectedLeave.status === 'pending' ? '待主管審核中' : '已核准休假'}
+                   </span>
+                </div>
+             </div>
+           ) : (
+             <div className="py-6 text-center relative z-10 text-gray-400 bg-white/5 rounded-2xl border border-white/10">
+               <span className="text-sm font-bold flex items-center justify-center gap-2"><Coffee size={16} /> 本日無排班與排休</span>
+             </div>
+           )}
         </div>
       </div>
     </div>
@@ -1426,8 +1799,7 @@ export default function App() {
   const [timeBlockDemands, setTimeBlockDemands] = useState(initialTimeBlockDemands);
   const [employeeLeaves, setEmployeeLeaves] = useState(initialLeavesMap);
   const [ruleEnabled, setRuleEnabled] = useState(true); 
-  const [monthlyLeaveDays, setMonthlyLeaveDays] = useState(8);
-  const [dailyWorkHours, setDailyWorkHours] = useState(9);
+  const [leaveSettings, setLeaveSettings] = useState(initialLeaveSettings);
   const [shifts, setShifts] = useState(() => generateInitialShifts());
   const [announcement, setAnnouncement] = useState(DEFAULT_ANNOUNCEMENT);
 
@@ -1460,13 +1832,15 @@ export default function App() {
         if (data.leaves) setEmployeeLeaves(data.leaves);
         if (data.demands) setTimeBlockDemands(data.demands);
         if (data.announcement !== undefined) setAnnouncement(data.announcement);
+        if (data.leaveSettings !== undefined) setLeaveSettings(data.leaveSettings);
       } else {
         setDoc(docRef, {
           users: initialRegisteredUsers,
           shifts: generateInitialShifts(),
           leaves: initialLeavesMap,
           demands: initialTimeBlockDemands,
-          announcement: DEFAULT_ANNOUNCEMENT
+          announcement: DEFAULT_ANNOUNCEMENT,
+          leaveSettings: initialLeaveSettings
         }, { merge: true });
       }
     }, (err) => console.error("Snapshot error", err));
@@ -1540,8 +1914,26 @@ export default function App() {
     syncStateToCloud(firebaseUser, { users: newUsers, leaves: newLeaves, shifts: newShifts });
   };
 
+  const handleAddEmployeeLeave = (empName, dateStr) => {
+    const currentLeaves = employeeLeaves[empName] || [];
+    if (currentLeaves.some(l => l.date === dateStr)) return;
+    const newLeavesArray = [...currentLeaves, { date: dateStr, status: 'approved', managerHandled: true }];
+    handleSaveLeaves(empName, newLeavesArray);
+  };
+
+  const handleRemoveEmployeeLeave = (empName, dateStr) => {
+    const currentLeaves = employeeLeaves[empName] || [];
+    const newLeavesArray = currentLeaves.filter(l => l.date !== dateStr);
+    handleSaveLeaves(empName, newLeavesArray);
+  };
+
+  const handleUpdateLeaveSettings = (newSettings) => {
+    setLeaveSettings(newSettings);
+    syncStateToCloud(firebaseUser, { leaveSettings: newSettings });
+  };
+
   const handleApproveLeave = (emp, date) => {
-    const updatedLeaves = employeeLeaves[emp].map(l => l.date === date ? { ...l, status: 'approved' } : l);
+    const updatedLeaves = employeeLeaves[emp].map(l => l.date === date ? { ...l, status: 'approved', managerHandled: true } : l);
     updateAndSyncLeaves(emp, updatedLeaves);
   };
 
@@ -1550,23 +1942,80 @@ export default function App() {
     updateAndSyncLeaves(emp, updatedLeaves);
   };
 
+  const handleApproveAllLeavesForDate = (date) => {
+    let updatedLeavesMap = { ...employeeLeaves };
+    let changed = false;
+    Object.keys(updatedLeavesMap).forEach(emp => {
+      let empChanged = false;
+      const newEmpLeaves = updatedLeavesMap[emp].map(l => {
+        if (l.date === date && l.status === 'pending') {
+          empChanged = true;
+          changed = true;
+          return { ...l, status: 'approved', managerHandled: true };
+        }
+        return l;
+      });
+      if (empChanged) updatedLeavesMap[emp] = newEmpLeaves;
+    });
+    if (changed) {
+      setEmployeeLeaves(updatedLeavesMap);
+      syncStateToCloud(firebaseUser, { leaves: updatedLeavesMap });
+    }
+  };
+
+  const handleRejectAllLeavesForDate = (date) => {
+    let updatedLeavesMap = { ...employeeLeaves };
+    let changed = false;
+    Object.keys(updatedLeavesMap).forEach(emp => {
+      const oldLen = updatedLeavesMap[emp].length;
+      updatedLeavesMap[emp] = updatedLeavesMap[emp].filter(l => !(l.date === date && l.status === 'pending'));
+      if (updatedLeavesMap[emp].length !== oldLen) changed = true;
+    });
+    if (changed) {
+      setEmployeeLeaves(updatedLeavesMap);
+      syncStateToCloud(firebaseUser, { leaves: updatedLeavesMap });
+    }
+  };
+
   const handleSaveLeaves = (userName, leavesArray) => {
-    updateAndSyncLeaves(userName, leavesArray);
+    let newLeavesMap = { ...employeeLeaves, [userName]: leavesArray };
+
+    const dateCounts = {};
+    Object.values(newLeavesMap).forEach(leaves => {
+      leaves.forEach(l => {
+        dateCounts[l.date] = (dateCounts[l.date] || 0) + 1;
+      });
+    });
+
+    Object.keys(newLeavesMap).forEach(emp => {
+      newLeavesMap[emp] = newLeavesMap[emp].map(l => {
+        if (dateCounts[l.date] > 1 && l.status === 'approved' && !l.managerHandled) {
+          return { ...l, status: 'pending' };
+        } 
+        else if (dateCounts[l.date] <= 1 && l.status === 'pending' && !l.managerHandled) {
+          return { ...l, status: 'approved' };
+        }
+        return l;
+      });
+    });
+
+    setEmployeeLeaves(newLeavesMap);
+    syncStateToCloud(firebaseUser, { leaves: newLeavesMap });
   };
 
   const handleAddManualShift = (dateStr, shiftCategory, userName) => {
     const user = registeredUsers.find(u => u.name === userName);
     if (!user) return;
 
-    const dayNum = parseInt(dateStr.split('/')[1]);
-    const isWknd = isWeekendDay(dayNum);
-    const dayOfWeek = (dayNum + 6) % 7;
+    const [y, m, d] = dateStr.split('/').map(Number);
+    const info = getDayInfo(y, m, d);
+    const dayOfWeek = new Date(y, m - 1, d).getDay();
     const dayStr = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][dayOfWeek];
     
     const newShift = {
       id: `manual_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
       date: dateStr, day: dayStr, type: user.role, shiftCategory: shiftCategory, 
-      time: getRoleDefaultTime(user.role, isWknd, shiftCategory), assignee: userName, status: 'confirmed'
+      time: getRoleDefaultTime(user.role, info.isOffDay, shiftCategory), assignee: userName, status: 'confirmed'
     };
     
     const newShifts = [...shifts, newShift];
@@ -1582,9 +2031,13 @@ export default function App() {
 
   const handleAutoSchedule = () => {
     let allShifts = [];
+    const autoScheduleDaysLimit = leaveSettings?.total || 8;
+    const targetY = leaveSettings?.year || 2026;
+    const targetM = leaveSettings?.month || 3;
+    
     registeredUsers.forEach(u => {
         const leaves = employeeLeaves[u.name] || [];
-        const userShifts = generateFullScheduleForUser(u, leaves, ruleEnabled, monthlyLeaveDays);
+        const userShifts = generateFullScheduleForUser(u, leaves, ruleEnabled, autoScheduleDaysLimit, targetY, targetM);
         allShifts = [...allShifts, ...userShifts];
     });
 
@@ -1592,8 +2045,8 @@ export default function App() {
     const uniqueDates = [...new Set(updatedShifts.map((s) => s.date))];
 
     uniqueDates.forEach((date) => {
-        const dayNum = parseInt(date.split('/')[1]);
-        const isWknd = isWeekendDay(dayNum);
+        const [y, m, d] = date.split('/').map(Number);
+        const info = getDayInfo(y, m, d);
 
         const getCoverage = (h) =>
         updatedShifts.filter((s) => s.date === date && isHourInTimeStr(h, s.time)).length;
@@ -1610,7 +2063,7 @@ export default function App() {
             const uInfo = registeredUsers.find((u) => u.name === shift.assignee);
             if (!uInfo || !uInfo.role.includes('兼職')) return;
 
-            if (!isWknd) {
+            if (!info.isOffDay) {
             if (uInfo.role.includes('早班兼職')) {
                 const dem11 = getDemandForHour(11, false, timeBlockDemands);
                 const cov11 = getCoverage(11);
@@ -1689,19 +2142,19 @@ export default function App() {
       {activeScreen === 'login' && <LoginScreen onLogin={handleLoginSuccess} onGoRegister={() => setActiveScreen('register')} registeredUsers={registeredUsers} />}
       {activeScreen === 'register' && <RegisterScreen onGoLogin={() => setActiveScreen('login')} registeredUsers={registeredUsers} onRegister={onRegisterNew} />}
       
-      {activeScreen === 'home' && <HomeScreen role={role} currentUser={currentUser} onLogout={handleLogout} shifts={shifts} timeBlockDemands={timeBlockDemands} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onOpenEditor={() => navigateTo('schedule_editor')} onOpenLeaveApproval={() => navigateTo('leave_approval')} />}
+      {activeScreen === 'home' && <HomeScreen role={role} currentUser={currentUser} onLogout={handleLogout} shifts={shifts} timeBlockDemands={timeBlockDemands} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onOpenEditor={() => navigateTo('schedule_editor')} onOpenLeaveApproval={() => navigateTo('leave_approval')} />}
       
-      {activeScreen === 'leave_approval' && <LeaveApprovalScreen onBack={handleBack} employeeLeaves={employeeLeaves} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} />}
+      {activeScreen === 'leave_approval' && <LeaveApprovalScreen onBack={handleBack} employeeLeaves={employeeLeaves} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onApproveAll={handleApproveAllLeavesForDate} onRejectAll={handleRejectAllLeavesForDate} />}
 
-      {activeScreen === 'schedule_editor' && <ScheduleEditorScreen shifts={shifts} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} timeBlockDemands={timeBlockDemands} onAddShift={handleAddManualShift} onRemoveShift={handleRemoveManualShift} onAutoSchedule={handleAutoSchedule} onBack={handleBack} ruleEnabled={ruleEnabled} monthlyLeaveDays={monthlyLeaveDays} />}
+      {activeScreen === 'schedule_editor' && <ScheduleEditorScreen shifts={shifts} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} timeBlockDemands={timeBlockDemands} onAddShift={handleAddManualShift} onRemoveShift={handleRemoveManualShift} onAutoSchedule={handleAutoSchedule} onBack={handleBack} ruleEnabled={ruleEnabled} leaveSettings={leaveSettings} announcement={announcement} onNavigate={navigateTo} />}
       
-      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
+      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
       
-      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} />}
+      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
       
-      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} monthlyLeaveDays={monthlyLeaveDays} setMonthlyLeaveDays={setMonthlyLeaveDays} dailyWorkHours={dailyWorkHours} setDailyWorkHours={setDailyWorkHours} timeBlockDemands={timeBlockDemands} setTimeBlockDemands={setTimeBlockDemands} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} />}
+      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} />}
       
-      {activeScreen === 'employee_profile' && <EmployeeProfileScreen currentUser={currentUser} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} />}
+      {activeScreen === 'employee_profile' && <EmployeeProfileScreen currentUser={currentUser} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} shifts={shifts} leaveSettings={leaveSettings} />}
       
       {activeScreen !== 'login' && activeScreen !== 'register' && <BottomNav role={role} activeScreen={activeScreen} onNavigate={navigateTo} pendingCount={pendingLeavesCount} />}
     </div>
