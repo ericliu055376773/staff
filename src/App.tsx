@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Home, User, Calendar as CalendarIcon,
   CalendarCheck, Plus, Users, Briefcase, Clock, ShieldCheck, RefreshCw,
-  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter, AlignLeft, Coffee, X
+  CheckCircle, AlertCircle, Lock, LogOut, Wand2, Settings, Trash2, Bell, XCircle, Filter, AlignLeft, Coffee, X, Store
 } from 'lucide-react';
 
 // === Firebase 雲端資料庫連線核心 ===
@@ -91,50 +91,78 @@ const isHourInTimeStr = (hour, timeStr) => {
 };
 
 const getDemandForHour = (hour, isWeekend, demands) => {
-  let blockId = '';
-  if (hour >= 11 && hour < 15) blockId = 'tb1';
-  else if (hour >= 15 && hour < 17) blockId = 'tb2';
-  else if (hour >= 17 && hour < 22) blockId = 'tb3';
-  else if (hour >= 22 && hour < 24) blockId = 'tb4';
-
-  const block = demands.find(d => d.id === blockId);
+  const block = demands.find(d => {
+    if (!d.name || !d.name.includes('-')) return false;
+    let [start, end] = d.name.split('-').map(t => parseInt(t.trim().split(':')[0], 10));
+    if (isNaN(start) || isNaN(end)) return false;
+    if (end === 0) end = 24;
+    return hour >= start && hour < end;
+  });
   if (!block) return 0;
   return isWeekend ? block.reqWeekend : block.reqWeekday;
 };
 
-// 新增：系統預設班別與職位時間參數
-const initialShiftTimes = {
-  base_morning: '11:00 - 15:00 & 17:00 - 22:00',
-  base_night: '15:00 - 00:00',
-  base_stay: '11:00 - 22:00',
-  full_morning: '11:00 - 15:00 & 17:00 - 22:00',
-  full_night: '15:00 - 00:00',
-  part_morning_weekday: '11:00 - 15:00',
-  part_morning_weekend: '11:00 - 15:00 & 17:00 - 22:00',
-  part_morning_weekend_alt: '11:00 - 20:00', // 自動排班調度用
-  part_night_weekday: '18:00 - 22:00',
-  part_night_weekend: '11:00 - 15:00 & 17:00 - 22:00',
+// 升級版：支援陣列格式以應付動態新增與刪除
+const initialShiftTimes = [
+  { id: 'base_morning', name: '早班(基本預設)', time: '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+  { id: 'base_night', name: '晚班(基本預設)', time: '15:00 - 00:00', isSystem: true },
+  { id: 'base_stay', name: '留守(基本預設)', time: '11:00 - 22:00', isSystem: true },
+  { id: 'full_morning', name: '早班正職', time: '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+  { id: 'full_night', name: '晚班正職', time: '15:00 - 00:00', isSystem: true },
+  { id: 'part_morning_weekday', name: '早班兼職(平日)', time: '11:00 - 15:00', isSystem: true },
+  { id: 'part_night_weekday', name: '晚班兼職(平日)', time: '18:00 - 22:00', isSystem: true },
+  { id: 'part_morning_weekend', name: '兼職(假日)', time: '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+  { id: 'part_morning_weekend_alt', name: '兼職(假日替代調度)', time: '11:00 - 20:00', isSystem: true },
+  { id: 'part_night_weekend', name: '晚班兼職(假日)', time: '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+];
+
+const normalizeShiftTimes = (st) => {
+  if (Array.isArray(st)) return st;
+  // 向後相容舊資料結構
+  return [
+    { id: 'base_morning', name: '早班(基本預設)', time: st.base_morning || '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+    { id: 'base_night', name: '晚班(基本預設)', time: st.base_night || '15:00 - 00:00', isSystem: true },
+    { id: 'base_stay', name: '留守(基本預設)', time: st.base_stay || '11:00 - 22:00', isSystem: true },
+    { id: 'full_morning', name: '早班正職', time: st.full_morning || '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+    { id: 'full_night', name: '晚班正職', time: st.full_night || '15:00 - 00:00', isSystem: true },
+    { id: 'part_morning_weekday', name: '早班兼職(平日)', time: st.part_morning_weekday || '11:00 - 15:00', isSystem: true },
+    { id: 'part_night_weekday', name: '晚班兼職(平日)', time: st.part_night_weekday || '18:00 - 22:00', isSystem: true },
+    { id: 'part_morning_weekend', name: '兼職(假日)', time: st.part_morning_weekend || '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+    { id: 'part_morning_weekend_alt', name: '兼職(假日替代調度)', time: st.part_morning_weekend_alt || '11:00 - 20:00', isSystem: true },
+    { id: 'part_night_weekend', name: '晚班兼職(假日)', time: st.part_night_weekend || '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
+  ];
 };
 
-const getRoleDefaultTime = (role, isWeekend, shiftCategory, shiftTimes = initialShiftTimes) => {
-  if (shiftCategory === '早班') return shiftTimes.base_morning;
-  if (shiftCategory === '晚班') return shiftTimes.base_night;
-  if (shiftCategory === '留守') return shiftTimes.base_stay;
+const getRoleDefaultTime = (role, isWeekend, shiftCategory, shiftTimesObj = initialShiftTimes) => {
+  const shiftArr = normalizeShiftTimes(shiftTimesObj);
+  const getTime = (id) => shiftArr.find(x => x.id === id)?.time || '';
+  
+  // 優先檢查是否有完全符合的自訂職位時間
+  const customRole = shiftArr.find(x => !x.isSystem && x.name === role);
+  if (customRole) return customRole.time;
+
+  if (shiftCategory === '早班') return getTime('base_morning');
+  if (shiftCategory === '晚班') return getTime('base_night');
+  if (shiftCategory === '留守') return getTime('base_stay');
 
   const isPartTime = role.includes('兼職');
   const isMorning = role.includes('早班');
   if (isPartTime) {
     return isMorning 
-      ? (isWeekend ? shiftTimes.part_morning_weekend : shiftTimes.part_morning_weekday)
-      : (isWeekend ? shiftTimes.part_night_weekend : shiftTimes.part_night_weekday);
+      ? (isWeekend ? getTime('part_morning_weekend') : getTime('part_morning_weekday'))
+      : (isWeekend ? getTime('part_night_weekend') : getTime('part_night_weekday'));
   } else {
-    return isMorning ? shiftTimes.full_morning : shiftTimes.full_night;
+    return isMorning ? getTime('full_morning') : getTime('full_night');
   }
 };
 
 const isDayUnderstaffed = (dateStr, isWeekend, shifts, demands) => {
   const dayShifts = shifts.filter((s) => s.date === dateStr);
-  const checkHours = [11, 15, 17, 22];
+  const checkHours = demands.map(d => {
+    if (!d.name || !d.name.includes('-')) return null;
+    return parseInt(d.name.split('-')[0].split(':')[0], 10);
+  }).filter(h => h !== null && !isNaN(h));
+
   for (let hour of checkHours) {
     const demand = getDemandForHour(hour, isWeekend, demands);
     const coverage = dayShifts.filter(s => isHourInTimeStr(hour, s.time)).length;
@@ -205,14 +233,15 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveD
   return newShifts;
 };
 
-// 系統初始設定
+// 系統初始設定 (更新為圖片需求的數量)
 const initialTimeBlockDemands = [
-  { id: 'tb1', name: '11:00 - 15:00', reqWeekday: 5, reqWeekend: 15 },
+  { id: 'tb1', name: '11:00 - 15:00', reqWeekday: 7, reqWeekend: 15 },
   { id: 'tb2', name: '15:00 - 17:00', reqWeekday: 5, reqWeekend: 7 },
   { id: 'tb3', name: '17:00 - 22:00', reqWeekday: 15, reqWeekend: 19 },
   { id: 'tb4', name: '22:00 - 00:00', reqWeekday: 5, reqWeekend: 6 },
 ];
 
+const initialBusinessHours = "11:00 - 00:00";
 const initialRegisteredUsers = []; 
 const initialLeavesMap = {}; 
 const generateInitialShifts = () => { return []; };
@@ -675,7 +704,7 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
 
               return (
                 <button key={day} onClick={() => setSelectedHomeDate(dateStr)} className={`relative w-full aspect-square rounded-2xl flex flex-col items-center justify-center transition-all duration-200 ${btnClass}`}>
-                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : info.isWeekend ? 'text-orange-500' : '')}`}>{day}</span>
+                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700'))}`}>{day}</span>
                   {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                   {isUnderstaffed && !myLeaveToday && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full shadow-sm border-2 border-white z-20"></div>}
                   {!isUnderstaffed && hasShift && !isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
@@ -972,7 +1001,7 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
 
             return (
               <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 font-bold text-sm ${btnClass}`}>
-                <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : info.isWeekend ? 'text-orange-500' : '')}`}>{day}</span>
+                <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700'))}`}>{day}</span>
                 {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 {hasShift && !isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                 {hasShift && isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
@@ -1430,7 +1459,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
               return (
                 <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass}`}>
-                  <span className={`text-[14px] ${info.isOffDay && !myLeave && !isFull ? 'text-red-500 font-bold' : ''}`}>{day}</span>
+                  <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700')) : ''}`}>{day}</span>
                   {info.isHoliday && !myLeave && !isFull && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 </button>
               );
@@ -1478,20 +1507,31 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
   );
 }
 
-function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement, shiftTimes, onUpdateShiftTimes }) {
+function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement, shiftTimes, onUpdateShiftTimes, timeBlockDemands, onUpdateTimeBlockDemands, businessHours, onUpdateBusinessHours }) {
   const [localAnnouncement, setLocalAnnouncement] = useState(announcement);
   const [localLeaveSettings, setLocalLeaveSettings] = useState(leaveSettings || { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 });
-  const [localShiftTimes, setLocalShiftTimes] = useState(shiftTimes || initialShiftTimes);
+  const [localShiftTimes, setLocalShiftTimes] = useState(normalizeShiftTimes(shiftTimes));
+  const [localDemands, setLocalDemands] = useState(timeBlockDemands || initialTimeBlockDemands);
+  const [localBusinessHours, setLocalBusinessHours] = useState(businessHours || '11:00 - 00:00');
+  
   const [isSyncing, setIsSyncing] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  
+  // 防呆機制 Modal
+  const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'demand' | 'role', id: string, name: string }
+  const [saveTarget, setSaveTarget] = useState(null); // 'demands' | 'roles'
 
   useEffect(() => {
     if (leaveSettings) setLocalLeaveSettings(leaveSettings);
   }, [leaveSettings]);
 
   useEffect(() => {
-    if (shiftTimes) setLocalShiftTimes(shiftTimes);
+    if (shiftTimes) setLocalShiftTimes(normalizeShiftTimes(shiftTimes));
   }, [shiftTimes]);
+
+  useEffect(() => {
+    if (timeBlockDemands) setLocalDemands(timeBlockDemands);
+  }, [timeBlockDemands]);
 
   const handleSyncGov = () => {
     setIsSyncing(true);
@@ -1520,12 +1560,108 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
     onUpdateAnnouncement(localAnnouncement);
     onUpdateLeaveSettings(localLeaveSettings);
     if (onUpdateShiftTimes) onUpdateShiftTimes(localShiftTimes);
+    if (onUpdateTimeBlockDemands) onUpdateTimeBlockDemands(localDemands);
+    if (onUpdateBusinessHours) onUpdateBusinessHours(localBusinessHours);
     setToastMsg('設定已全面儲存並發佈');
     setTimeout(() => setToastMsg(''), 3000);
   };
 
+  const handleAddDemand = () => {
+    const newId = `tb_${Date.now()}`;
+    setLocalDemands([...localDemands, { id: newId, name: 'HH:MM - HH:MM', reqWeekday: 0, reqWeekend: 0 }]);
+  };
+
+  const handleUpdateDemand = (id, field, value) => {
+    setLocalDemands(localDemands.map(d => d.id === id ? { ...d, [field]: value } : d));
+  };
+
+  const handleAddRole = () => {
+    const newId = `custom_${Date.now()}`;
+    setLocalShiftTimes([...localShiftTimes, { id: newId, name: '自訂職位名稱', time: '11:00 - 15:00', isSystem: false }]);
+  };
+
+  const handleUpdateRole = (id, field, value) => {
+    setLocalShiftTimes(localShiftTimes.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === 'demand') {
+      setLocalDemands(localDemands.filter(d => d.id !== deleteTarget.id));
+    } else if (deleteTarget.type === 'role') {
+      setLocalShiftTimes(localShiftTimes.filter(r => r.id !== deleteTarget.id));
+    }
+    setDeleteTarget(null);
+  };
+
+  const confirmSave = () => {
+    if (saveTarget === 'demands') {
+      if (onUpdateTimeBlockDemands) onUpdateTimeBlockDemands(localDemands);
+      setToastMsg('時段人數需求規則已儲存並同步');
+    } else if (saveTarget === 'roles') {
+      if (onUpdateShiftTimes) onUpdateShiftTimes(localShiftTimes);
+      setToastMsg('職位上班時段規則已儲存並同步');
+    }
+    setSaveTarget(null);
+    setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const renderRoleGroup = (prefix, title) => {
+    const items = localShiftTimes.filter(r => r.id.startsWith(prefix));
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-4">
+         <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">{title}</h4>
+         <div className="grid grid-cols-1 gap-2">
+             {items.map(role => (
+               <div key={role.id} className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                  <span className="text-xs font-bold text-gray-700 w-24 truncate">{role.name}</span>
+                  <input type="text" value={role.time} onChange={e => handleUpdateRole(role.id, 'time', e.target.value)} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+               </div>
+             ))}
+         </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f5f6f8] pb-32 animate-in slide-in-from-right-8 duration-300 relative">
+      {/* 防呆刪除確認 Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}></div>
+          <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm relative z-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-4"><AlertCircle size={24} /></div>
+            <h3 className="text-xl font-bold text-[#111] mb-2">確認刪除？</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              確定要刪除「<strong className="text-red-500">{deleteTarget.name}</strong>」嗎？此操作不可逆，可能會影響未來的自動排班規則。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)} className="flex-1 py-3.5 rounded-2xl bg-gray-50 text-gray-600 font-bold hover:bg-gray-100 transition-colors">取消</button>
+              <button onClick={confirmDelete} className="flex-1 py-3.5 rounded-2xl bg-red-500 text-white font-bold hover:bg-red-600 shadow-md shadow-red-600/20 transition-colors">確定刪除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 防呆儲存確認 Modal */}
+      {saveTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSaveTarget(null)}></div>
+          <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm relative z-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-4"><CheckCircle size={24} /></div>
+            <h3 className="text-xl font-bold text-[#111] mb-2">確認儲存設定？</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              確定要儲存您編輯的「<strong className="text-blue-600">{saveTarget === 'demands' ? '時段人數需求規則' : '各職位上班時段規則'}</strong>」嗎？儲存後將直接影響後續的「一鍵自動排班」與「手動排班」設定。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setSaveTarget(null)} className="flex-1 py-3.5 rounded-2xl bg-gray-50 text-gray-600 font-bold hover:bg-gray-100 transition-colors">取消</button>
+              <button onClick={confirmSave} className="flex-1 py-3.5 rounded-2xl bg-[#2563EB] text-white font-bold hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-colors">確認儲存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="sticky top-0 bg-[#f5f6f8]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-4 border-b border-gray-200/50">
         <button onClick={onBack} className="p-2 -ml-2 text-gray-800 hover:bg-gray-200 rounded-full transition mr-4"><ChevronLeft size={28} strokeWidth={2} /></button>
         <div>
@@ -1536,52 +1672,171 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
 
       <div className="px-8 mt-6 space-y-6">
         
-        {/* 排休天數與限制 (連動行政院行事曆) */}
+        {/* 新增：營業時間卡片 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4">
+             <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Store size={20} strokeWidth={2.5} /></div>
+             <div>
+                <h3 className="font-bold text-[#111] text-lg">營業時間</h3>
+                <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Business Hours</p>
+             </div>
+          </div>
+          <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100">
+             <span className="text-xs font-bold text-gray-700 w-24">門市營業時間</span>
+             <input type="text" value={localBusinessHours} onChange={e => setLocalBusinessHours(e.target.value)} placeholder="例如 11:00 - 00:00" className="flex-1 bg-white border border-gray-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-blue-500 shadow-sm" />
+          </div>
+        </div>
+
+        {/* 新增：平日與假日時間安排人數規則卡片 */}
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
           <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-4">
              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600"><CalendarIcon size={20} strokeWidth={2.5} /></div>
+                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600"><Users size={20} strokeWidth={2.5} /></div>
                 <div>
-                   <h3 className="font-bold text-[#111] text-lg">排班目標與限制</h3>
-                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Schedule Target</p>
+                   <h3 className="font-bold text-[#111] text-lg">時段人數需求規則</h3>
+                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Headcount Rule Config</p>
                 </div>
              </div>
-             <button onClick={handleSyncGov} disabled={isSyncing} className="flex items-center gap-1.5 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl hover:bg-indigo-100 transition-colors active:scale-95 shadow-sm">
-                <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+             <button onClick={handleAddDemand} className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm">
+                <Plus size={16} strokeWidth={3} />
+             </button>
+          </div>
+
+          <div className="space-y-3">
+             <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-gray-400 pl-1">
+                <div className="col-span-5">需求時段區間</div>
+                <div className="col-span-3 text-center">平日人數</div>
+                <div className="col-span-3 text-center">假日人數</div>
+                <div className="col-span-1"></div>
+             </div>
+             {localDemands.map(demand => (
+                <div key={demand.id} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded-xl border border-gray-100">
+                   <div className="col-span-5">
+                      <input type="text" value={demand.name} onChange={e => handleUpdateDemand(demand.id, 'name', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-purple-500 shadow-sm" placeholder="HH:MM - HH:MM" />
+                   </div>
+                   <div className="col-span-3 flex justify-center">
+                      <input type="number" value={demand.reqWeekday} onChange={e => handleUpdateDemand(demand.id, 'reqWeekday', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
+                   </div>
+                   <div className="col-span-3 flex justify-center">
+                      <input type="number" value={demand.reqWeekend} onChange={e => handleUpdateDemand(demand.id, 'reqWeekend', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
+                   </div>
+                   <div className="col-span-1 flex justify-center">
+                      <button onClick={() => setDeleteTarget({ type: 'demand', id: demand.id, name: demand.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此時段">
+                        <Trash2 size={14} />
+                      </button>
+                   </div>
+                </div>
+             ))}
+          </div>
+          
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('demands')} className="bg-purple-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-purple-600/20 hover:bg-purple-700 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存人數規則
+             </button>
+          </div>
+        </div>
+
+        {/* 各個職位的上班時段時間卡片 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center justify-between mb-5 border-b border-gray-50 pb-4">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600"><Clock size={20} strokeWidth={2.5} /></div>
+                <div>
+                   <h3 className="font-bold text-[#111] text-lg">各職位上班時段規則</h3>
+                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Shift & Role Time Rules</p>
+                </div>
+             </div>
+             <button onClick={handleAddRole} className="flex items-center gap-1 text-[10px] font-bold bg-orange-50 text-orange-600 px-3 py-2 rounded-xl hover:bg-orange-100 transition-colors active:scale-95 shadow-sm">
+                <Plus size={14} /> 新增職位
+             </button>
+          </div>
+
+          <div className="space-y-2">
+            {renderRoleGroup('base_', '📌 基本班別 (手動加班預設)')}
+            {renderRoleGroup('full_', '📌 正職預設工時 (自動排班預設)')}
+            {renderRoleGroup('part_', '📌 兼職預設工時 (自動排班預設)')}
+
+            {/* 自訂職位區塊 */}
+            {localShiftTimes.filter(r => !r.isSystem).length > 0 && (
+              <div className="mb-4 pt-2">
+                <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 自訂新增職位</h4>
+                <div className="grid grid-cols-1 gap-2">
+                    {localShiftTimes.filter(r => !r.isSystem).map(role => (
+                      <div key={role.id} className="flex items-center gap-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
+                          <input type="text" value={role.name} onChange={e => handleUpdateRole(role.id, 'name', e.target.value)} className="w-28 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="職位名稱" />
+                          <input type="text" value={role.time} onChange={e => handleUpdateRole(role.id, 'time', e.target.value)} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="時段" />
+                          <button onClick={() => setDeleteTarget({ type: 'role', id: role.id, name: role.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此職位">
+                             <Trash2 size={14} />
+                          </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('roles')} className="bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-orange-500/20 hover:bg-orange-600 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存職位時段
+             </button>
+          </div>
+        </div>
+
+        {/* 排班目標與限制 (連動行政院行事曆) */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center justify-between mb-6 border-b border-gray-50 pb-4">
+             <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600"><CalendarIcon size={24} strokeWidth={2} /></div>
+                <div>
+                   <h3 className="font-extrabold text-[#111] text-xl tracking-wide">排班目標與限制</h3>
+                   <p className="text-[11px] text-gray-400 font-bold uppercase mt-0.5 tracking-wider">Schedule Target</p>
+                </div>
+             </div>
+             <button onClick={handleSyncGov} disabled={isSyncing} className="flex items-center gap-2 text-xs font-bold bg-indigo-50/50 text-indigo-600 px-4 py-2.5 rounded-xl hover:bg-indigo-100 transition-colors active:scale-95 shadow-sm border border-indigo-100/50">
+                <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
                 {isSyncing ? '同步中...' : '同步行政院'}
              </button>
           </div>
 
-          <div className="flex items-center gap-3 mb-4">
-             <select value={localLeaveSettings.year} onChange={e => setLocalLeaveSettings({...localLeaveSettings, year: parseInt(e.target.value)})} className="appearance-none bg-gray-50 font-bold text-sm py-2.5 pl-4 pr-8 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_10px_center]">
-               <option value={2026}>2026 年</option>
-               <option value={2027}>2027 年</option>
-             </select>
-             <select value={localLeaveSettings.month} onChange={e => setLocalLeaveSettings({...localLeaveSettings, month: parseInt(e.target.value)})} className="appearance-none bg-gray-50 font-bold text-sm py-2.5 pl-4 pr-8 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:8px_8px] bg-[right_10px_center] flex-1">
-               {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{m} 月份</option>)}
-             </select>
+          <div className="flex items-center gap-4 mb-6">
+             <div className="relative flex-1">
+                 <select value={localLeaveSettings.year} onChange={e => setLocalLeaveSettings({...localLeaveSettings, year: parseInt(e.target.value)})} className="w-full appearance-none bg-white font-extrabold text-gray-700 text-base py-3 pl-5 pr-10 rounded-2xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:10px_10px] bg-[right_16px_center]">
+                   {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y} 年</option>)}
+                 </select>
+             </div>
+             <div className="relative flex-1">
+                 <select value={localLeaveSettings.month} onChange={e => setLocalLeaveSettings({...localLeaveSettings, month: parseInt(e.target.value)})} className="w-full appearance-none bg-white font-extrabold text-gray-700 text-base py-3 pl-5 pr-10 rounded-2xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%234F46E5%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[length:10px_10px] bg-[right_16px_center]">
+                   {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{m} 月份</option>)}
+                 </select>
+             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-5">
-             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
-                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">總休假數</label>
-                <div className="flex items-end gap-1">
-                   <input type="number" value={localLeaveSettings.total} onChange={e => setLocalLeaveSettings({...localLeaveSettings, total: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
-                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+          <div className="grid grid-cols-3 gap-3 mb-6">
+             <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 flex flex-col items-center justify-center shadow-sm">
+                <label className="block text-[11px] font-extrabold text-gray-500 mb-3 tracking-wide">總休假數</label>
+                <div className="flex items-center gap-2">
+                   <select value={localLeaveSettings.total} onChange={e => setLocalLeaveSettings({...localLeaveSettings, total: parseInt(e.target.value)||0})} className="appearance-none bg-white border border-gray-200 rounded-xl px-3 py-2 text-lg font-black text-gray-700 outline-none focus:border-indigo-500 shadow-sm text-center min-w-[60px] cursor-pointer hover:border-indigo-300 transition-colors">
+                      {Array.from({length: 32}, (_, i) => <option key={i} value={i}>{i}</option>)}
+                   </select>
+                   <span className="text-sm font-bold text-gray-500">天</span>
                 </div>
              </div>
-             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
-                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">假日上限</label>
-                <div className="flex items-end gap-1">
-                   <input type="number" value={localLeaveSettings.weekend} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekend: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
-                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+             <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 flex flex-col items-center justify-center shadow-sm">
+                <label className="block text-[11px] font-extrabold text-gray-500 mb-3 tracking-wide">假日上限</label>
+                <div className="flex items-center gap-2">
+                   <select value={localLeaveSettings.weekend} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekend: parseInt(e.target.value)||0})} className="appearance-none bg-white border border-gray-200 rounded-xl px-3 py-2 text-lg font-black text-gray-700 outline-none focus:border-indigo-500 shadow-sm text-center min-w-[60px] cursor-pointer hover:border-indigo-300 transition-colors">
+                      {Array.from({length: 16}, (_, i) => <option key={i} value={i}>{i}</option>)}
+                   </select>
+                   <span className="text-sm font-bold text-gray-500">天</span>
                 </div>
              </div>
-             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex flex-col items-center">
-                <label className="block text-[10px] font-bold text-gray-500 mb-1.5">平日上限</label>
-                <div className="flex items-end gap-1">
-                   <input type="number" value={localLeaveSettings.weekday} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekday: parseInt(e.target.value)||0})} className="w-12 bg-white border border-gray-200 rounded-lg p-1 text-sm font-bold text-center outline-none focus:border-indigo-500 shadow-sm" />
-                   <span className="text-xs font-bold text-gray-500 mb-1">天</span>
+             <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 flex flex-col items-center justify-center shadow-sm">
+                <label className="block text-[11px] font-extrabold text-gray-500 mb-3 tracking-wide">平日上限</label>
+                <div className="flex items-center gap-2">
+                   <select value={localLeaveSettings.weekday} onChange={e => setLocalLeaveSettings({...localLeaveSettings, weekday: parseInt(e.target.value)||0})} className="appearance-none bg-white border border-gray-200 rounded-xl px-3 py-2 text-lg font-black text-gray-700 outline-none focus:border-indigo-500 shadow-sm text-center min-w-[60px] cursor-pointer hover:border-indigo-300 transition-colors">
+                      {Array.from({length: 32}, (_, i) => <option key={i} value={i}>{i}</option>)}
+                   </select>
+                   <span className="text-sm font-bold text-gray-500">天</span>
                 </div>
              </div>
           </div>
@@ -1607,73 +1862,6 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
           >
              {toastMsg ? <><CheckCircle size={18} className="text-green-400" /> {toastMsg}</> : '儲存所有設定並發佈'}
           </button>
-        </div>
-
-        {/* 新增：班別與職位時間設定 */}
-        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
-          <div className="flex items-center gap-3 mb-5 border-b border-gray-50 pb-4">
-            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Clock size={20} strokeWidth={2.5} /></div>
-            <div>
-              <h3 className="font-bold text-[#111] text-lg">班別與職位時間設定</h3>
-              <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Shift & Role Time Config</p>
-            </div>
-          </div>
-
-          <div className="space-y-5">
-            <div>
-               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 基本班別 (手動加班預設)</h4>
-               <div className="grid grid-cols-1 gap-2">
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-20">早班</span>
-                      <input type="text" value={localShiftTimes.base_morning} onChange={e => setLocalShiftTimes({...localShiftTimes, base_morning: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-20">晚班</span>
-                      <input type="text" value={localShiftTimes.base_night} onChange={e => setLocalShiftTimes({...localShiftTimes, base_night: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-20">留守</span>
-                      <input type="text" value={localShiftTimes.base_stay} onChange={e => setLocalShiftTimes({...localShiftTimes, base_stay: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-               </div>
-            </div>
-
-            <div>
-               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 正職預設工時 (自動排班)</h4>
-               <div className="grid grid-cols-1 gap-2">
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-20">早班正職</span>
-                      <input type="text" value={localShiftTimes.full_morning} onChange={e => setLocalShiftTimes({...localShiftTimes, full_morning: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-20">晚班正職</span>
-                      <input type="text" value={localShiftTimes.full_night} onChange={e => setLocalShiftTimes({...localShiftTimes, full_night: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-               </div>
-            </div>
-
-            <div>
-               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 兼職預設工時 (自動排班)</h4>
-               <div className="grid grid-cols-1 gap-2">
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-24">早班兼職(平日)</span>
-                      <input type="text" value={localShiftTimes.part_morning_weekday} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekday: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-24">晚班兼職(平日)</span>
-                      <input type="text" value={localShiftTimes.part_night_weekday} onChange={e => setLocalShiftTimes({...localShiftTimes, part_night_weekday: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-24">兼職(假日)</span>
-                      <input type="text" value={localShiftTimes.part_morning_weekend} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekend: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
-                   </div>
-                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                      <span className="text-xs font-bold text-gray-700 w-24">兼職(假日替代)</span>
-                      <input type="text" value={localShiftTimes.part_morning_weekend_alt} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekend_alt: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" placeholder="用於排班調度" />
-                   </div>
-               </div>
-            </div>
-          </div>
         </div>
 
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50 flex justify-between items-center cursor-pointer" onClick={() => setRuleEnabled(!ruleEnabled)}>
@@ -1811,7 +1999,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 
               return (
                 <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${isSelected ? 'ring-2 ring-[#111] ring-offset-2 transform scale-105 z-10 shadow-md' : ''}`}>
-                  <span className={`text-[14px] font-bold ${info.isHoliday && !leaveInfo && !isShift ? 'text-red-500' : ''}`}>{day}</span>
+                  <span className={`text-[14px] font-bold ${(!leaveInfo && !isShift) ? (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700')) : ''}`}>{day}</span>
                   {info.isHoliday && !leaveInfo && !isShift && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 </button>
               );
@@ -1890,6 +2078,7 @@ export default function App() {
   const [shifts, setShifts] = useState(() => generateInitialShifts());
   const [announcement, setAnnouncement] = useState(DEFAULT_ANNOUNCEMENT);
   const [shiftTimes, setShiftTimes] = useState(initialShiftTimes);
+  const [businessHours, setBusinessHours] = useState(initialBusinessHours);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -1921,7 +2110,8 @@ export default function App() {
         if (data.demands) setTimeBlockDemands(data.demands);
         if (data.announcement !== undefined) setAnnouncement(data.announcement);
         if (data.leaveSettings !== undefined) setLeaveSettings(data.leaveSettings);
-        if (data.shiftTimes !== undefined) setShiftTimes(data.shiftTimes);
+        if (data.shiftTimes !== undefined) setShiftTimes(normalizeShiftTimes(data.shiftTimes));
+        if (data.businessHours !== undefined) setBusinessHours(data.businessHours);
       } else {
         setDoc(docRef, {
           users: initialRegisteredUsers,
@@ -1930,7 +2120,8 @@ export default function App() {
           demands: initialTimeBlockDemands,
           announcement: DEFAULT_ANNOUNCEMENT,
           leaveSettings: initialLeaveSettings,
-          shiftTimes: initialShiftTimes
+          shiftTimes: initialShiftTimes,
+          businessHours: initialBusinessHours
         }, { merge: true });
       }
     }, (err) => console.error("Snapshot error", err));
@@ -2025,6 +2216,16 @@ export default function App() {
   const handleUpdateShiftTimes = (newSettings) => {
     setShiftTimes(newSettings);
     syncStateToCloud(firebaseUser, { shiftTimes: newSettings });
+  };
+
+  const handleUpdateTimeBlockDemands = (newDemands) => {
+    setTimeBlockDemands(newDemands);
+    syncStateToCloud(firebaseUser, { demands: newDemands });
+  };
+
+  const handleUpdateBusinessHours = (newHours) => {
+    setBusinessHours(newHours);
+    syncStateToCloud(firebaseUser, { businessHours: newHours });
   };
 
   const handleApproveLeave = (emp, date) => {
@@ -2129,6 +2330,8 @@ export default function App() {
     const autoScheduleDaysLimit = leaveSettings?.total || 8;
     const targetY = leaveSettings?.year || 2026;
     const targetM = leaveSettings?.month || 3;
+    const shiftArr = normalizeShiftTimes(shiftTimes);
+    const getTime = (id) => shiftArr.find(x => x.id === id)?.time || '';
     
     registeredUsers.forEach(u => {
         const leaves = employeeLeaves[u.name] || [];
@@ -2165,12 +2368,12 @@ export default function App() {
                 const dem18 = getDemandForHour(18, false, timeBlockDemands);
                 const cov18 = getCoverage(18);
 
-                if (shift.time === shiftTimes.part_morning_weekday && cov11 > dem11 && cov18 < dem18) {
-                shift.time = shiftTimes.part_night_weekday;
+                if (shift.time === getTime('part_morning_weekday') && cov11 > dem11 && cov18 < dem18) {
+                shift.time = getTime('part_night_weekday');
                 shift.shiftCategory = '晚班';
                 changed = true;
-                } else if (shift.time === shiftTimes.part_night_weekday && cov18 > dem18 && cov11 < dem11) {
-                shift.time = shiftTimes.part_morning_weekday;
+                } else if (shift.time === getTime('part_night_weekday') && cov18 > dem18 && cov11 < dem11) {
+                shift.time = getTime('part_morning_weekday');
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
@@ -2183,15 +2386,15 @@ export default function App() {
             const dem17 = getDemandForHour(17, true, timeBlockDemands);
             const cov17 = getCoverage(17);
 
-            if (shift.time === shiftTimes.part_morning_weekend) {
+            if (shift.time === getTime('part_morning_weekend')) {
                 if (cov17 > dem17 && cov15 < dem15) {
-                shift.time = shiftTimes.part_morning_weekend_alt;
+                shift.time = getTime('part_morning_weekend_alt');
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
-            } else if (shift.time === shiftTimes.part_morning_weekend_alt) {
+            } else if (shift.time === getTime('part_morning_weekend_alt')) {
                 if (cov15 > dem15 && cov17 < dem17) {
-                shift.time = shiftTimes.part_morning_weekend;
+                shift.time = getTime('part_morning_weekend');
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
@@ -2247,7 +2450,7 @@ export default function App() {
       
       {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
       
-      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftTimes={shiftTimes} onUpdateShiftTimes={handleUpdateShiftTimes} />}
+      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftTimes={shiftTimes} onUpdateShiftTimes={handleUpdateShiftTimes} timeBlockDemands={timeBlockDemands} onUpdateTimeBlockDemands={handleUpdateTimeBlockDemands} businessHours={businessHours} onUpdateBusinessHours={handleUpdateBusinessHours} />}
       
       {activeScreen === 'employee_profile' && <EmployeeProfileScreen currentUser={currentUser} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} shifts={shifts} leaveSettings={leaveSettings} />}
       
