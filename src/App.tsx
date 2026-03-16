@@ -888,12 +888,16 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
               </div>
              </div>
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
-              {pendingLeaves.map((p, idx) => (
+              {pendingLeaves.map((p, idx) => {
+                const userObj = registeredUsers.find(u => u.name === p.emp);
+                return (
                 <div key={idx} className="flex justify-between items-center bg-gray-50 p-4 rounded-2xl border border-gray-100">
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-md shadow-sm border ${getRoleStyles(userObj?.role || '')}`}>
+                        {userObj?.role || '未知'}
+                      </span>
                       <span className="font-bold text-sm text-gray-800">{p.emp}</span>
-                      <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded font-bold">待審核</span>
                     </div>
                    <span className="text-xs text-gray-500 font-bold flex items-center gap-1"><CalendarIcon size={12} /> {p.date.split('/')[1]}/{p.date.split('/')[2]} 申請休假</span>
                   </div>
@@ -902,7 +906,8 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                      <button onClick={() => onRejectLeave(p.emp, p.date)} className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition shadow-sm"><XCircle size={18} strokeWidth={2.5} /></button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               {pendingLeaves.length === 0 && <div className="text-center py-6 text-gray-400 font-bold text-sm">目前沒有待審核的假單！</div>}
              </div>
             <button onClick={() => setShowApprovalModal(false)} className="mt-6 w-full py-3.5 rounded-2xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">完成並關閉</button>
@@ -1171,7 +1176,7 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
   );
 }
 
-function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectLeave, onApproveAll, onRejectAll }) {
+function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectLeave, onApproveAll, onRejectAll, registeredUsers }) {
   const pendingByDate = {};
   Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
     leaves.filter(l => l.status === 'pending').forEach(l => {
@@ -1221,10 +1226,17 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
                   </div>
 
                   <div className="flex gap-3 overflow-x-auto no-scrollbar pt-1 pb-2 ml-2 -mr-5 pr-5">
-                    {emps.map((emp) => (
-                      <div key={emp} className="shrink-0 w-36 bg-gray-50 rounded-[1rem] p-3 border border-gray-100 flex flex-col gap-3 shadow-sm">
-                        <span className="font-extrabold text-[14px] text-gray-800 text-center tracking-wide">{emp}</span>
-                        <div className="flex gap-2">
+                    {emps.map((emp) => {
+                      const userObj = registeredUsers.find(u => u.name === emp);
+                      return (
+                      <div key={emp} className="shrink-0 w-36 bg-gray-50 rounded-[1rem] p-3 border border-gray-100 flex flex-col gap-2 shadow-sm">
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                           <span className={`text-[9px] px-2 py-0.5 rounded-md shadow-sm border w-full text-center truncate ${getRoleStyles(userObj?.role || '')}`}>
+                              {userObj?.role || '未綁定職位'}
+                           </span>
+                           <span className="font-extrabold text-[14px] text-gray-800 text-center tracking-wide">{emp}</span>
+                        </div>
+                        <div className="flex gap-2 mt-1">
                           <button onClick={() => onRejectLeave(emp, date)} className="flex-1 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center justify-center shadow-sm active:scale-95" title="駁回">
                             <XCircle size={16} />
                           </button>
@@ -1233,7 +1245,8 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -2662,7 +2675,7 @@ export default function App() {
       
       {activeScreen === 'home' && <HomeScreen role={role} currentUser={currentUser} onLogout={handleLogout} shifts={shifts} timeBlockDemands={timeBlockDemands} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onOpenEditor={() => navigateTo('schedule_editor')} onOpenLeaveApproval={() => navigateTo('leave_approval')} />}
       
-      {activeScreen === 'leave_approval' && <LeaveApprovalScreen onBack={handleBack} employeeLeaves={employeeLeaves} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onApproveAll={handleApproveAllLeavesForDate} onRejectAll={handleRejectAllLeavesForDate} />}
+      {activeScreen === 'leave_approval' && <LeaveApprovalScreen onBack={handleBack} employeeLeaves={employeeLeaves} onApproveLeave={handleApproveLeave} onRejectLeave={handleRejectLeave} onApproveAll={handleApproveAllLeavesForDate} onRejectAll={handleRejectAllLeavesForDate} registeredUsers={registeredUsers} />}
 
       {activeScreen === 'schedule_editor' && <ScheduleEditorScreen shifts={shifts} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} timeBlockDemands={timeBlockDemands} onAddShift={handleAddManualShift} onRemoveShift={handleRemoveManualShift} onAutoSchedule={handleAutoSchedule} onBack={handleBack} ruleEnabled={ruleEnabled} leaveSettings={leaveSettings} announcement={announcement} onNavigate={navigateTo} />}
       
