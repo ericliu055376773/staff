@@ -58,7 +58,50 @@ const syncStateToCloud = async (firebaseUser, updates) => {
 // 1. 工具函數與核心演算法 (加入行政院假日支援)
 // ==========================================
 
-// 升級：名稱精簡化以利右上角「小字標記」顯示
+const getRoleStyles = (role) => {
+  if (!role) return 'bg-blue-600 text-white shadow-inner';
+  if (role.includes('店長') && !role.includes('副店長')) return 'shiny-gold font-extrabold';
+  if (role.includes('副店長')) return 'shiny-silver font-extrabold';
+  if (role.includes('組長')) return 'shiny-bronze font-extrabold';
+  if (role.includes('儲備幹部')) return 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md border-transparent';
+  if (role.includes('兼職')) return 'bg-[#F2823A] text-white shadow-inner border-transparent';
+  return 'bg-blue-600 text-white shadow-inner border-transparent'; 
+};
+
+const getShiftCardStyles = (role) => {
+  if (!role) return 'bg-blue-50 border-blue-100 text-blue-800 hover:bg-blue-100';
+  if (role.includes('店長') && !role.includes('副店長')) return 'bg-yellow-50/80 border-yellow-300 text-yellow-900 hover:bg-yellow-100/80';
+  if (role.includes('副店長')) return 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200';
+  if (role.includes('組長')) return 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100';
+  if (role.includes('儲備幹部')) return 'bg-purple-50 border-purple-200 text-purple-900 hover:bg-purple-100';
+  if (role.includes('兼職')) return 'bg-orange-50 border-orange-100 text-orange-800 hover:bg-orange-100';
+  return 'bg-blue-50 border-blue-100 text-blue-800 hover:bg-blue-100';
+};
+
+const getDeleteBtnStyles = (role) => {
+  if (!role) return 'text-blue-400 hover:text-blue-600 hover:bg-blue-200/50';
+  if (role.includes('店長') && !role.includes('副店長')) return 'text-yellow-600 hover:text-yellow-800 hover:bg-yellow-200/50';
+  if (role.includes('副店長')) return 'text-gray-500 hover:text-gray-700 hover:bg-gray-300/50';
+  if (role.includes('組長')) return 'text-amber-600 hover:text-amber-800 hover:bg-amber-200/50';
+  if (role.includes('儲備幹部')) return 'text-purple-400 hover:text-purple-600 hover:bg-purple-200/50';
+  if (role.includes('兼職')) return 'text-orange-400 hover:text-orange-600 hover:bg-orange-200/50';
+  return 'text-blue-400 hover:text-blue-600 hover:bg-blue-200/50';
+};
+
+const getUserTypeBadge = (name, registeredUsers) => {
+  const u = registeredUsers.find((user) => user.name === name);
+  if (!u) return null;
+  if (u.role.includes('店長') && !u.role.includes('副店長')) return <span className="bg-yellow-100 text-yellow-800 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-yellow-300 shadow-sm">店長</span>;
+  if (u.role.includes('副店長')) return <span className="bg-gray-200 text-gray-800 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-gray-300 shadow-sm">副店</span>;
+  if (u.role.includes('組長')) return <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-amber-300 shadow-sm">組長</span>;
+  if (u.role.includes('儲備幹部')) return <span className="bg-purple-100 text-purple-700 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-purple-200 shadow-sm">儲備</span>;
+  return u.role.includes('兼職') ? (
+    <span className="bg-orange-100 text-orange-600 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-orange-200 shadow-sm">兼職</span>
+  ) : (
+    <span className="bg-blue-100 text-blue-600 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0 border border-blue-200 shadow-sm">正職</span>
+  );
+};
+
 const taiwanHolidays = {
   '2026/1/1': '元旦',
   '2026/2/16': '春節', '2026/2/17': '春節', '2026/2/18': '春節', '2026/2/19': '春節', '2026/2/20': '春節', '2026/2/23': '春節', '2026/2/24': '春節',
@@ -88,8 +131,8 @@ const getDayInfo = (year, month, day) => {
     isWeekend,
     isHoliday: !!holidayName,
     holidayName,
-    displayLabel, // 新增：供右上角小字標記統一使用
-    isOffDay: isWeekend || !!holidayName // 例假日、連假、國定假日皆視為休假日
+    displayLabel, 
+    isOffDay: isWeekend || !!holidayName
   };
 };
 
@@ -118,7 +161,6 @@ const getDemandForHour = (hour, isWeekend, demands) => {
   return isWeekend ? block.reqWeekend : block.reqWeekday;
 };
 
-// 升級版：支援陣列格式以應付動態新增與刪除
 const initialShiftTimes = [
   { id: 'base_morning', name: '早班(基本預設)', time: '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
   { id: 'base_night', name: '晚班(基本預設)', time: '15:00 - 00:00', isSystem: true },
@@ -134,7 +176,6 @@ const initialShiftTimes = [
 
 const normalizeShiftTimes = (st) => {
   if (Array.isArray(st)) return st;
-  // 向後相容舊資料結構
   return [
     { id: 'base_morning', name: '早班(基本預設)', time: st.base_morning || '11:00 - 15:00 & 17:00 - 22:00', isSystem: true },
     { id: 'base_night', name: '晚班(基本預設)', time: st.base_night || '15:00 - 00:00', isSystem: true },
@@ -153,7 +194,6 @@ const getRoleDefaultTime = (role, isWeekend, shiftCategory, shiftTimesObj = init
   const shiftArr = normalizeShiftTimes(shiftTimesObj);
   const getTime = (id) => shiftArr.find(x => x.id === id)?.time || '';
   
-  // 優先檢查是否有完全符合的自訂職位時間
   const customRole = shiftArr.find(x => !x.isSystem && x.name === role);
   if (customRole) return customRole.time;
 
@@ -261,9 +301,7 @@ const initialBusinessHours = "11:00 - 00:00";
 const initialRegisteredUsers = []; 
 const initialLeavesMap = {}; 
 const generateInitialShifts = () => { return []; };
-// 升級：新增 lockDate 作為排休截止日 (預設 20 號)
 const initialLeaveSettings = { year: 2026, month: 3, total: 10, weekend: 4, weekday: 6, lockDate: 20 };
-
 const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，請依據系統當前設定之額度自行劃定排休。\n（假單送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
 
 // ==========================================
@@ -372,7 +410,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
 
       <div className="flex items-center justify-between relative z-10">
         <div className="flex items-center gap-3 flex-1">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0 shadow-inner ${localRole.includes('兼職') ? 'bg-[#F2823A]' : 'bg-blue-600'}`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shrink-0 shadow-inner ${getRoleStyles(localRole)}`}>
             {localName.charAt(0)}
           </div>
           <div className="flex-1">
@@ -606,16 +644,6 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
     else setViewMonth(v => v + 1);
   };
 
-  const getUserTypeBadge = (name) => {
-    const u = registeredUsers.find((user) => user.name === name);
-    if (!u) return null;
-    return u.role.includes('兼職') ? (
-      <span className="bg-orange-100 text-orange-600 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0">兼</span>
-    ) : (
-      <span className="bg-blue-100 text-blue-600 text-[9px] px-1.5 py-0.5 rounded font-black ml-1 shrink-0">正</span>
-    );
-  };
-
   const displayShifts = role === 'manager' ? shifts : shifts.filter((s) => s.assignee === currentUser);
 
   const pendingLeaves = [];
@@ -714,14 +742,12 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                 <button key={day} onClick={() => setSelectedHomeDate(dateStr)} className={`relative w-full aspect-square rounded-2xl flex flex-col items-center justify-center transition-all duration-200 ${btnClass}`}>
                   <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700'))}`}>{day}</span>
                   
-                  {/* 升級：國定假日/連假/例假日 右上角小字標記 */}
                   {info.displayLabel && (
                     <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${isSelected ? 'text-white/90' : 'text-blue-600'}`}>
                       {info.displayLabel}
                     </span>
                   )}
 
-                  {/* 升級：防止缺人紅點擋住小字，若有小字則紅點移到左上 */}
                   {isUnderstaffed && !myLeaveToday && <div className={`absolute top-1.5 ${info.displayLabel ? 'left-1.5' : 'right-1.5'} w-2 h-2 bg-red-500 rounded-full shadow-sm border-2 border-white z-20`}></div>}
                   {!isUnderstaffed && hasShift && !isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                   {hasShift && isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
@@ -830,12 +856,12 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                           </span>
                           <div className="flex flex-wrap gap-2 mt-2">
                             {roles[roleName].map(shift => (
-                              <div key={shift.id} className="flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-1.5 rounded-xl border border-gray-100">
-                                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-white text-gray-500 shadow-sm">
+                              <div key={shift.id} className={`border px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-sm ${getShiftCardStyles(shift.type)}`}>
+                                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${getRoleStyles(shift.type)}`}>
                                   <User size={12} strokeWidth={2.5} />
                                 </div>
-                                <span className="text-sm font-extrabold text-gray-800">{shift.assignee}</span>
-                                {getUserTypeBadge(shift.assignee)}
+                                <span className="text-sm font-extrabold">{shift.assignee}</span>
+                                {getUserTypeBadge(shift.assignee, registeredUsers)}
                               </div>
                             ))}
                           </div>
@@ -1022,7 +1048,6 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
               <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 font-bold text-sm ${btnClass}`}>
                 <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700'))}`}>{day}</span>
                 
-                {/* 升級：右上角小字標記 */}
                 {info.displayLabel && (
                   <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${isSelected ? 'text-white/90' : 'text-blue-600'}`}>
                     {info.displayLabel}
@@ -1087,17 +1112,16 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
                    </div>
                    <div className="flex flex-wrap gap-2.5">
                     {groupedAssignedShifts[roleName].map(s => {
-                      const isPartTime = s.type.includes('兼職');
                       return (
-                        <div key={s.id} className={`border px-3 py-2 rounded-xl flex items-center gap-2.5 shadow-sm animate-in zoom-in duration-200 transition-colors ${isPartTime ? 'bg-orange-50 border-orange-100 text-orange-800 hover:bg-orange-100' : 'bg-blue-50 border-blue-100 text-blue-800 hover:bg-blue-100'}`}>
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-white shadow-sm border ${isPartTime ? 'text-orange-400 border-orange-100' : 'text-blue-400 border-blue-100'}`}>
+                        <div key={s.id} className={`border px-3 py-2 rounded-xl flex items-center gap-2.5 shadow-sm animate-in zoom-in duration-200 transition-colors ${getShiftCardStyles(s.type)}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${getRoleStyles(s.type)}`}>
                             <User size={14} strokeWidth={2.5} />
                           </div>
                           <div className="flex flex-col">
-                            <span className={`text-[9px] font-bold leading-none mb-0.5 ${isPartTime ? 'text-orange-500' : 'text-blue-500'}`}>{s.type}</span>
+                            <span className={`text-[9px] font-bold leading-none mb-0.5 opacity-80`}>{s.type}</span>
                             <span className="text-sm font-black tracking-wide leading-none">{s.assignee}</span>
                           </div>
-                          <button onClick={() => onRemoveShift(s.id)} className={`hover:scale-110 rounded-full p-1 transition-all ml-1 ${isPartTime ? 'text-orange-400 hover:text-orange-600 hover:bg-orange-200/50' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-200/50'}`} title="移除人員">
+                          <button onClick={() => onRemoveShift(s.id)} className={`hover:scale-110 rounded-full p-1 transition-all ml-1 ${getDeleteBtnStyles(s.type)}`} title="移除人員">
                             <XCircle size={16} />
                           </button>
                         </div>
@@ -1122,8 +1146,9 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
           <div className="flex flex-wrap gap-2">
             {availableUsers.map(u => (
               <button key={u.id} onClick={() => onAddShift(selectedDate, activeTab, u.name)} className="bg-white border border-gray-200 text-gray-700 hover:border-blue-500 hover:text-blue-600 px-3 py-2 rounded-xl flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all active:scale-95 group">
+                <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${getRoleStyles(u.role)}`}></div>
                 <span className="font-bold text-sm">{u.name}</span>
-                <span className="text-[10px] text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-600 bg-gray-100 px-1.5 py-0.5 rounded font-bold transition-colors">{u.role}</span>
+                {getUserTypeBadge(u.name, registeredUsers)}
               </button>
             ))}
           </div>
@@ -2073,7 +2098,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
         {/* 個人資訊卡片 */}
         <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-inner shrink-0 ${user.role.includes('兼職') ? 'bg-orange-500' : 'bg-blue-600'}`}>
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl shrink-0 shadow-inner ${getRoleStyles(user.role)}`}>
               {user.name.charAt(0)}
             </div>
             <div className="flex flex-col gap-0.5">
@@ -2588,7 +2613,38 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-full sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-200 sm:shadow-2xl bg-[#f5f6f8] font-sans overflow-hidden relative flex flex-col">
-      <style dangerouslySetInnerHTML={{ __html: `.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }` }} />
+      <style dangerouslySetInnerHTML={{ __html: `
+        .no-scrollbar::-webkit-scrollbar { display: none; } 
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes shine {
+          0% { background-position: 200% center; }
+          100% { background-position: -200% center; }
+        }
+        .shiny-gold {
+          background: linear-gradient(120deg, #D4AF37 20%, #FFEA9F 38%, #FFFFFF 45%, #FFEA9F 52%, #D4AF37 80%);
+          background-size: 200% auto;
+          color: #5C4300;
+          animation: shine 2.5s linear infinite;
+          box-shadow: 0 2px 10px rgba(212, 175, 55, 0.5), inset 0 1px 2px rgba(255,255,255,0.8);
+          border: 1px solid #D4AF37;
+        }
+        .shiny-silver {
+          background: linear-gradient(120deg, #9CA3AF 20%, #E5E7EB 38%, #FFFFFF 45%, #E5E7EB 52%, #9CA3AF 80%);
+          background-size: 200% auto;
+          color: #1F2937;
+          animation: shine 2.5s linear infinite;
+          box-shadow: 0 2px 10px rgba(156, 163, 175, 0.5), inset 0 1px 2px rgba(255,255,255,0.8);
+          border: 1px solid #9CA3AF;
+        }
+        .shiny-bronze {
+          background: linear-gradient(120deg, #B45309 20%, #FDE68A 38%, #FFFFFF 45%, #FDE68A 52%, #B45309 80%);
+          background-size: 200% auto;
+          color: #451A03;
+          animation: shine 2.5s linear infinite;
+          box-shadow: 0 2px 10px rgba(180, 83, 9, 0.5), inset 0 1px 2px rgba(255,255,255,0.8);
+          border: 1px solid #B45309;
+        }
+      ` }} />
       
       {/* 雲端連線異常偵測 UI */}
       {systemError && (
