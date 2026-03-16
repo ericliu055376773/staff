@@ -233,7 +233,7 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveD
   return newShifts;
 };
 
-// 系統初始設定 (更新為圖片需求的數量)
+// 系統初始設定
 const initialTimeBlockDemands = [
   { id: 'tb1', name: '11:00 - 15:00', reqWeekday: 7, reqWeekend: 15 },
   { id: 'tb2', name: '15:00 - 17:00', reqWeekday: 5, reqWeekend: 7 },
@@ -245,7 +245,8 @@ const initialBusinessHours = "11:00 - 00:00";
 const initialRegisteredUsers = []; 
 const initialLeavesMap = {}; 
 const generateInitialShifts = () => { return []; };
-const initialLeaveSettings = { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 };
+// 升級：新增 lockDate 作為排休截止日 (預設 20 號)
+const initialLeaveSettings = { year: 2026, month: 3, total: 10, weekend: 4, weekday: 6, lockDate: 20 };
 
 const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，請依據系統當前設定之額度自行劃定排休。\n（假單送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
 
@@ -301,7 +302,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
   
   const [newLeaveMonth, setNewLeaveMonth] = useState('');
   const [newLeaveDay, setNewLeaveDay] = useState('');
-  const [leaveToDelete, setLeaveToDelete] = useState(null); // 防呆刪除假單
+  const [leaveToDelete, setLeaveToDelete] = useState(null);
 
   const localRole = `${localShift}${localPosition}`;
   const maxTotalLeaves = leaveSettings?.total || 8;
@@ -581,6 +582,8 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
 
   const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
   const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const firstDayOfWeek = new Date(viewYear, viewMonth - 1, 1).getDay();
+  const emptyDays = Array.from({ length: firstDayOfWeek }, (_, i) => i);
 
   const [selectedHomeDate, setSelectedHomeDate] = useState(`${leaveSettings?.year || 2026}/${leaveSettings?.month || 3}/1`);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -685,6 +688,7 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
               <div key={d} className="text-center text-[10px] font-bold text-gray-400 mb-1">{d}</div>
             ))}
+            {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {viewDays.map((day) => {
               const dateStr = `${viewYear}/${viewMonth}/${day}`;
               const info = getDayInfo(viewYear, viewMonth, day);
@@ -882,6 +886,8 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
 
   const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
   const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const firstDayOfWeek = new Date(viewYear, viewMonth - 1, 1).getDay();
+  const emptyDays = Array.from({ length: firstDayOfWeek }, (_, i) => i);
 
   const [selectedDate, setSelectedDate] = useState(`${leaveSettings?.year || 2026}/${leaveSettings?.month || 3}/1`);
   const [activeTab, setActiveTab] = useState('早班'); 
@@ -989,6 +995,7 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
           {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
             <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
           ))}
+          {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
           {viewDays.map((day) => {
             const dateStr = `${viewYear}/${viewMonth}/${day}`;
             const info = getDayInfo(viewYear, viewMonth, day);
@@ -1297,6 +1304,12 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
   const targetYear = leaveSettings?.year || 2026;
   const targetMonth = leaveSettings?.month || 3;
+  const lockDate = leaveSettings?.lockDate || 20;
+  
+  // 計算當前系統日期，判斷是否超過排休截止日
+  const currentDate = new Date().getDate();
+  const isLocked = currentDate > lockDate;
+
   const MAX_LEAVES = leaveSettings?.total || 8;
   const MAX_WEEKEND_LEAVES = leaveSettings?.weekend || 1;
   const MAX_WEEKDAY_LEAVES = leaveSettings?.weekday || 7;
@@ -1304,6 +1317,8 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
   const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
   const marchDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const firstDayOfWeek = new Date(targetYear, targetMonth - 1, 1).getDay();
+  const emptyDays = Array.from({ length: firstDayOfWeek }, (_, i) => i);
 
   const othersLeaves = {};
   Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
@@ -1311,7 +1326,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
   });
 
   const handleDayClick = (day) => {
-    if (isSubmitted) return;
+    if (isSubmitted || isLocked) return; // 若已送出或系統上鎖則無法點擊
     const dateStr = `${targetYear}/${targetMonth}/${day}`;
 
     const existingIndex = selectedLeaves.findIndex(l => l.date === dateStr);
@@ -1393,7 +1408,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
       <header className="shrink-0 sticky top-0 bg-[#f8f9fc]/90 backdrop-blur-md z-10 flex items-center justify-between px-8 pt-12 pb-4 border-b border-gray-200/50">
         <div>
           <h1 className="text-2xl font-extrabold text-[#111] tracking-tight">{targetMonth}月份排休</h1>
-          <p className="text-xs font-semibold text-gray-500 mt-0.5">{currentUser} {isSubmitted ? ' - 假單已鎖定' : ` - 已選 ${monthLeavesCount} 天 (上限 ${MAX_LEAVES} 天)`}</p>
+          <p className="text-xs font-semibold text-gray-500 mt-0.5">{currentUser} {isLocked ? ' - 系統已鎖定' : isSubmitted ? ' - 假單已送出' : ` - 已選 ${monthLeavesCount} 天 (上限 ${MAX_LEAVES} 天)`}</p>
         </div>
         <button onClick={onLogout} className="w-10 h-10 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-full flex items-center justify-center transition shadow-sm active:scale-95" title="安全登出">
           <LogOut size={16} strokeWidth={2.5} />
@@ -1401,16 +1416,29 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
       </header>
 
       <div className="px-8 mt-6 flex-1 pb-[120px]">
-        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-6 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
-          <p className="text-xs font-bold text-blue-800 leading-relaxed text-center">
-             {announcement.split('\n').map((line, i) => (
-                <span key={i}>
-                  {line}
-                  <br />
-                </span>
-             ))}
-          </p>
-        </div>
+        {/* 若已超過排休截止日，顯示全域警告訊息 */}
+        {isLocked && (
+          <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-2xl mb-6 shadow-sm flex items-start gap-3">
+             <AlertCircle size={20} className="shrink-0 mt-0.5" />
+             <div>
+               <h4 className="font-bold text-sm">排休系統已關閉</h4>
+               <p className="text-xs font-medium mt-1 leading-relaxed">目前已超過本月排休截止日（{lockDate}號），無法再進行任何排休異動。如需修改假單，請直接聯繫主管處理。</p>
+             </div>
+          </div>
+        )}
+
+        {!isLocked && (
+          <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-6 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+            <p className="text-xs font-bold text-blue-800 leading-relaxed text-center">
+               {announcement.split('\n').map((line, i) => (
+                  <span key={i}>
+                    {line}
+                    <br />
+                  </span>
+               ))}
+            </p>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-6 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex flex-col gap-3 text-xs font-bold text-gray-500">
@@ -1438,6 +1466,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
               <div key={d} className={`text-center text-[10px] font-bold mb-2 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
             ))}
+            {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {marchDays.map((day) => {
               const dateStr = `${targetYear}/${targetMonth}/${day}`;
               const myLeave = selectedLeaves.find((l) => l.date === dateStr);
@@ -1457,8 +1486,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
                 btnClass = 'bg-red-50/30 text-red-500 hover:bg-red-100 border-transparent';
               }
 
+              // 鎖定狀態下，按鈕透明度降低
+              const lockedStyle = isLocked && !myLeave ? 'opacity-50 cursor-not-allowed' : '';
+
               return (
-                <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass}`}>
+                <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted || isLocked} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${lockedStyle}`}>
                   <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700')) : ''}`}>{day}</span>
                   {info.isHoliday && !myLeave && !isFull && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
                 </button>
@@ -1468,7 +1500,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
         </div>
 
         <div className="w-full">
-          {isSubmitted ? (
+          {isLocked ? (
+             <div className="w-full bg-gray-100 text-gray-400 py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm border border-gray-200 cursor-not-allowed">
+               <Lock size={20} /> 已超過排休截止日 ({lockDate}號)
+             </div>
+          ) : isSubmitted ? (
             <div className="w-full bg-green-50 text-green-600 py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm border border-green-100">
               <CheckCircle size={20} /> 假單已送出
             </div>
@@ -1509,7 +1545,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
 function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement, shiftTimes, onUpdateShiftTimes, timeBlockDemands, onUpdateTimeBlockDemands, businessHours, onUpdateBusinessHours }) {
   const [localAnnouncement, setLocalAnnouncement] = useState(announcement);
-  const [localLeaveSettings, setLocalLeaveSettings] = useState(leaveSettings || { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 });
+  const [localLeaveSettings, setLocalLeaveSettings] = useState(leaveSettings || { year: 2026, month: 3, total: 10, weekend: 4, weekday: 6, lockDate: 20 });
   const [localShiftTimes, setLocalShiftTimes] = useState(normalizeShiftTimes(shiftTimes));
   const [localDemands, setLocalDemands] = useState(timeBlockDemands || initialTimeBlockDemands);
   const [localBusinessHours, setLocalBusinessHours] = useState(businessHours || '11:00 - 00:00');
@@ -1519,7 +1555,7 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
   
   // 防呆機制 Modal
   const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'demand' | 'role', id: string, name: string }
-  const [saveTarget, setSaveTarget] = useState(null); // 'demands' | 'roles'
+  const [saveTarget, setSaveTarget] = useState(null); // 'demands' | 'roles' | 'leaveSettings' | 'announcement'
 
   useEffect(() => {
     if (leaveSettings) setLocalLeaveSettings(leaveSettings);
@@ -1539,31 +1575,28 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
       const y = localLeaveSettings.year;
       const m = localLeaveSettings.month;
       let offDaysCount = 0;
+      let weekendOff = 0;
+      let weekdayOff = 0;
       const daysInM = new Date(y, m, 0).getDate();
       for(let d=1; d<=daysInM; d++) {
-        if (getDayInfo(y, m, d).isOffDay) offDaysCount++;
+        const info = getDayInfo(y, m, d);
+        if (info.isOffDay) {
+          offDaysCount++;
+          if (info.isWeekend) weekendOff++;
+          else weekdayOff++;
+        }
       }
       
       setLocalLeaveSettings(prev => ({
         ...prev,
         total: offDaysCount,
-        weekend: Math.min(offDaysCount, 4), // 預設安全配額
-        weekday: Math.max(offDaysCount - Math.min(offDaysCount, 4), 0)
+        weekend: weekendOff, 
+        weekday: weekdayOff
       }));
       setIsSyncing(false);
-      setToastMsg(`已載入 ${m}月 國定額度 (${offDaysCount}天)`);
+      setToastMsg(`已載入 ${m}月 行政院行事曆`);
       setTimeout(() => setToastMsg(''), 3000);
     }, 800);
-  };
-
-  const handleSaveAll = () => {
-    onUpdateAnnouncement(localAnnouncement);
-    onUpdateLeaveSettings(localLeaveSettings);
-    if (onUpdateShiftTimes) onUpdateShiftTimes(localShiftTimes);
-    if (onUpdateTimeBlockDemands) onUpdateTimeBlockDemands(localDemands);
-    if (onUpdateBusinessHours) onUpdateBusinessHours(localBusinessHours);
-    setToastMsg('設定已全面儲存並發佈');
-    setTimeout(() => setToastMsg(''), 3000);
   };
 
   const handleAddDemand = () => {
@@ -1601,9 +1634,26 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
     } else if (saveTarget === 'roles') {
       if (onUpdateShiftTimes) onUpdateShiftTimes(localShiftTimes);
       setToastMsg('職位上班時段規則已儲存並同步');
+    } else if (saveTarget === 'leaveSettings') {
+      if (onUpdateLeaveSettings) onUpdateLeaveSettings(localLeaveSettings);
+      setToastMsg('排休目標與限制已儲存並同步');
+    } else if (saveTarget === 'announcement') {
+      if (onUpdateAnnouncement) onUpdateAnnouncement(localAnnouncement);
+      if (onUpdateBusinessHours) onUpdateBusinessHours(localBusinessHours);
+      setToastMsg('門市營業資訊與公告已儲存並發佈');
     }
     setSaveTarget(null);
     setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const getSaveTargetName = () => {
+    switch(saveTarget) {
+      case 'demands': return '時段人數需求規則';
+      case 'roles': return '各職位上班時段規則';
+      case 'leaveSettings': return '排班目標與限制';
+      case 'announcement': return '門市資訊與排休公告';
+      default: return '設定';
+    }
   };
 
   const renderRoleGroup = (prefix, title) => {
@@ -1652,12 +1702,21 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
             <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-4"><CheckCircle size={24} /></div>
             <h3 className="text-xl font-bold text-[#111] mb-2">確認儲存設定？</h3>
             <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-              確定要儲存您編輯的「<strong className="text-blue-600">{saveTarget === 'demands' ? '時段人數需求規則' : '各職位上班時段規則'}</strong>」嗎？儲存後將直接影響後續的「一鍵自動排班」與「手動排班」設定。
+              確定要儲存您編輯的「<strong className="text-blue-600">{getSaveTargetName()}</strong>」嗎？儲存後將直接影響後續的排班運算或前台顯示。
             </p>
             <div className="flex gap-3">
               <button onClick={() => setSaveTarget(null)} className="flex-1 py-3.5 rounded-2xl bg-gray-50 text-gray-600 font-bold hover:bg-gray-100 transition-colors">取消</button>
               <button onClick={confirmSave} className="flex-1 py-3.5 rounded-2xl bg-[#2563EB] text-white font-bold hover:bg-blue-700 shadow-md shadow-blue-600/20 transition-colors">確認儲存</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast 提示 */}
+      {toastMsg && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-4 w-11/12 max-w-[320px]">
+          <div className="bg-green-500 text-white px-5 py-3 rounded-2xl shadow-2xl font-bold text-sm flex items-center justify-center gap-2 text-center leading-snug">
+            <CheckCircle size={20} className="shrink-0" /> {toastMsg}
           </div>
         </div>
       )}
@@ -1671,118 +1730,8 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
       </header>
 
       <div className="px-8 mt-6 space-y-6">
-        
-        {/* 新增：營業時間卡片 */}
-        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
-          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4">
-             <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Store size={20} strokeWidth={2.5} /></div>
-             <div>
-                <h3 className="font-bold text-[#111] text-lg">營業時間</h3>
-                <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Business Hours</p>
-             </div>
-          </div>
-          <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100">
-             <span className="text-xs font-bold text-gray-700 w-24">門市營業時間</span>
-             <input type="text" value={localBusinessHours} onChange={e => setLocalBusinessHours(e.target.value)} placeholder="例如 11:00 - 00:00" className="flex-1 bg-white border border-gray-200 rounded-lg p-2 text-sm font-bold outline-none focus:border-blue-500 shadow-sm" />
-          </div>
-        </div>
 
-        {/* 新增：平日與假日時間安排人數規則卡片 */}
-        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
-          <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-4">
-             <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600"><Users size={20} strokeWidth={2.5} /></div>
-                <div>
-                   <h3 className="font-bold text-[#111] text-lg">時段人數需求規則</h3>
-                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Headcount Rule Config</p>
-                </div>
-             </div>
-             <button onClick={handleAddDemand} className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm">
-                <Plus size={16} strokeWidth={3} />
-             </button>
-          </div>
-
-          <div className="space-y-3">
-             <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-gray-400 pl-1">
-                <div className="col-span-5">需求時段區間</div>
-                <div className="col-span-3 text-center">平日人數</div>
-                <div className="col-span-3 text-center">假日人數</div>
-                <div className="col-span-1"></div>
-             </div>
-             {localDemands.map(demand => (
-                <div key={demand.id} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded-xl border border-gray-100">
-                   <div className="col-span-5">
-                      <input type="text" value={demand.name} onChange={e => handleUpdateDemand(demand.id, 'name', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-purple-500 shadow-sm" placeholder="HH:MM - HH:MM" />
-                   </div>
-                   <div className="col-span-3 flex justify-center">
-                      <input type="number" value={demand.reqWeekday} onChange={e => handleUpdateDemand(demand.id, 'reqWeekday', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
-                   </div>
-                   <div className="col-span-3 flex justify-center">
-                      <input type="number" value={demand.reqWeekend} onChange={e => handleUpdateDemand(demand.id, 'reqWeekend', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
-                   </div>
-                   <div className="col-span-1 flex justify-center">
-                      <button onClick={() => setDeleteTarget({ type: 'demand', id: demand.id, name: demand.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此時段">
-                        <Trash2 size={14} />
-                      </button>
-                   </div>
-                </div>
-             ))}
-          </div>
-          
-          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
-             <button onClick={() => setSaveTarget('demands')} className="bg-purple-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-purple-600/20 hover:bg-purple-700 transition-colors active:scale-95 flex items-center gap-1.5">
-               <CheckCircle size={16} /> 儲存人數規則
-             </button>
-          </div>
-        </div>
-
-        {/* 各個職位的上班時段時間卡片 */}
-        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
-          <div className="flex items-center justify-between mb-5 border-b border-gray-50 pb-4">
-             <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600"><Clock size={20} strokeWidth={2.5} /></div>
-                <div>
-                   <h3 className="font-bold text-[#111] text-lg">各職位上班時段規則</h3>
-                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Shift & Role Time Rules</p>
-                </div>
-             </div>
-             <button onClick={handleAddRole} className="flex items-center gap-1 text-[10px] font-bold bg-orange-50 text-orange-600 px-3 py-2 rounded-xl hover:bg-orange-100 transition-colors active:scale-95 shadow-sm">
-                <Plus size={14} /> 新增職位
-             </button>
-          </div>
-
-          <div className="space-y-2">
-            {renderRoleGroup('base_', '📌 基本班別 (手動加班預設)')}
-            {renderRoleGroup('full_', '📌 正職預設工時 (自動排班預設)')}
-            {renderRoleGroup('part_', '📌 兼職預設工時 (自動排班預設)')}
-
-            {/* 自訂職位區塊 */}
-            {localShiftTimes.filter(r => !r.isSystem).length > 0 && (
-              <div className="mb-4 pt-2">
-                <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 自訂新增職位</h4>
-                <div className="grid grid-cols-1 gap-2">
-                    {localShiftTimes.filter(r => !r.isSystem).map(role => (
-                      <div key={role.id} className="flex items-center gap-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
-                          <input type="text" value={role.name} onChange={e => handleUpdateRole(role.id, 'name', e.target.value)} className="w-28 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="職位名稱" />
-                          <input type="text" value={role.time} onChange={e => handleUpdateRole(role.id, 'time', e.target.value)} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="時段" />
-                          <button onClick={() => setDeleteTarget({ type: 'role', id: role.id, name: role.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此職位">
-                             <Trash2 size={14} />
-                          </button>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
-             <button onClick={() => setSaveTarget('roles')} className="bg-orange-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-orange-500/20 hover:bg-orange-600 transition-colors active:scale-95 flex items-center gap-1.5">
-               <CheckCircle size={16} /> 儲存職位時段
-             </button>
-          </div>
-        </div>
-
-        {/* 排班目標與限制 (連動行政院行事曆) */}
+        {/* 排班目標與限制 (連動行政院行事曆) - UI 高還原升級 */}
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
           <div className="flex items-center justify-between mb-6 border-b border-gray-50 pb-4">
              <div className="flex items-center gap-3">
@@ -1841,29 +1790,157 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
              </div>
           </div>
 
-          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4 pt-2">
-             <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600"><AlignLeft size={20} strokeWidth={2.5} /></div>
+          {/* 新增：排休截止日設定 */}
+          <div className="bg-gray-50/50 p-4 rounded-2xl border border-gray-100 flex items-center justify-between shadow-sm mt-3">
              <div>
-                <h3 className="font-bold text-[#111] text-lg">排休系統公告</h3>
-                <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Announcement</p>
+               <label className="block text-[12px] font-extrabold text-gray-700 mb-1 tracking-wide">排休截止日 (鎖定期)</label>
+               <p className="text-[10px] text-gray-400 font-bold">超過此日期後，前台員工將無法自行異動假單</p>
+             </div>
+             <div className="flex items-center gap-2 shrink-0">
+                <span className="text-sm font-bold text-gray-500">每月</span>
+                <select value={localLeaveSettings.lockDate || 20} onChange={e => setLocalLeaveSettings({...localLeaveSettings, lockDate: parseInt(e.target.value) || 20})} className="appearance-none bg-white border border-gray-200 rounded-xl px-3 py-2 text-base font-black text-indigo-600 outline-none focus:border-indigo-500 shadow-sm text-center cursor-pointer hover:border-indigo-300 transition-colors">
+                   {Array.from({length: 31}, (_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
+                </select>
+                <span className="text-sm font-bold text-gray-500">號</span>
              </div>
           </div>
-          <textarea
-            value={localAnnouncement}
-            onChange={(e) => setLocalAnnouncement(e.target.value)}
-            className="w-full bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 focus:ring-2 focus:ring-green-500 outline-none leading-relaxed transition-all resize-none shadow-sm"
-            rows={4}
-            placeholder="請輸入要在員工排休畫面上方顯示的公告..."
-          />
-
-          <button 
-            onClick={handleSaveAll} 
-            className="mt-5 w-full py-4 bg-[#111] text-white rounded-2xl font-bold shadow-lg shadow-black/10 hover:bg-gray-800 transition-all flex justify-center items-center gap-2 active:scale-95"
-          >
-             {toastMsg ? <><CheckCircle size={18} className="text-green-400" /> {toastMsg}</> : '儲存所有設定並發佈'}
-          </button>
+          
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('leaveSettings')} className="bg-indigo-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存排休限制
+             </button>
+          </div>
         </div>
 
+        {/* 門市資訊與排休系統公告 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center gap-3 mb-4 border-b border-gray-50 pb-4">
+             <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Store size={20} strokeWidth={2.5} /></div>
+             <div>
+                <h3 className="font-bold text-[#111] text-lg">營業時間與公告</h3>
+                <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Store Info</p>
+             </div>
+          </div>
+          
+          <div className="mb-4">
+             <label className="block text-[11px] font-extrabold text-gray-500 mb-2 tracking-wide ml-1">門市營業時間</label>
+             <input type="text" value={localBusinessHours} onChange={e => setLocalBusinessHours(e.target.value)} placeholder="例如 11:00 - 00:00" className="w-full bg-white border border-gray-200 rounded-xl p-3 text-sm font-bold outline-none focus:border-blue-500 shadow-sm" />
+          </div>
+
+          <div>
+             <label className="block text-[11px] font-extrabold text-gray-500 mb-2 tracking-wide ml-1">前台排休系統公告</label>
+             <textarea
+                value={localAnnouncement}
+                onChange={(e) => setLocalAnnouncement(e.target.value)}
+                className="w-full bg-white p-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 focus:border-blue-500 outline-none leading-relaxed transition-all resize-none shadow-sm"
+                rows={4}
+                placeholder="請輸入要在員工排休畫面上方顯示的公告..."
+             />
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('announcement')} className="bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-md shadow-blue-600/20 hover:bg-blue-700 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存門市設定
+             </button>
+          </div>
+        </div>
+
+        {/* 平日與假日時間安排人數規則卡片 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-4">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600"><Users size={20} strokeWidth={2.5} /></div>
+                <div>
+                   <h3 className="font-bold text-[#111] text-lg">時段人數需求規則</h3>
+                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Headcount Rule Config</p>
+                </div>
+             </div>
+             <button onClick={handleAddDemand} className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm">
+                <Plus size={16} strokeWidth={3} />
+             </button>
+          </div>
+
+          <div className="space-y-3">
+             <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-gray-400 pl-1">
+                <div className="col-span-5">需求時段區間</div>
+                <div className="col-span-3 text-center">平日人數</div>
+                <div className="col-span-3 text-center">假日人數</div>
+                <div className="col-span-1"></div>
+             </div>
+             {localDemands.map(demand => (
+                <div key={demand.id} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded-xl border border-gray-100">
+                   <div className="col-span-5">
+                      <input type="text" value={demand.name} onChange={e => handleUpdateDemand(demand.id, 'name', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-purple-500 shadow-sm" placeholder="HH:MM - HH:MM" />
+                   </div>
+                   <div className="col-span-3 flex justify-center">
+                      <input type="number" value={demand.reqWeekday} onChange={e => handleUpdateDemand(demand.id, 'reqWeekday', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
+                   </div>
+                   <div className="col-span-3 flex justify-center">
+                      <input type="number" value={demand.reqWeekend} onChange={e => handleUpdateDemand(demand.id, 'reqWeekend', parseInt(e.target.value)||0)} className="w-12 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold text-center outline-none focus:border-purple-500 shadow-sm" />
+                   </div>
+                   <div className="col-span-1 flex justify-center">
+                      <button onClick={() => setDeleteTarget({ type: 'demand', id: demand.id, name: demand.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此時段">
+                        <Trash2 size={14} />
+                      </button>
+                   </div>
+                </div>
+             ))}
+          </div>
+          
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('demands')} className="bg-purple-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-md shadow-purple-600/20 hover:bg-purple-700 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存人數規則
+             </button>
+          </div>
+        </div>
+
+        {/* 各個職位的上班時段時間卡片 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center justify-between mb-5 border-b border-gray-50 pb-4">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600"><Clock size={20} strokeWidth={2.5} /></div>
+                <div>
+                   <h3 className="font-bold text-[#111] text-lg">各職位上班時段規則</h3>
+                   <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Shift & Role Time Rules</p>
+                </div>
+             </div>
+             <button onClick={handleAddRole} className="flex items-center gap-1 text-[10px] font-bold bg-orange-50 text-orange-600 px-3 py-2 rounded-xl hover:bg-orange-100 transition-colors active:scale-95 shadow-sm">
+                <Plus size={14} /> 新增職位
+             </button>
+          </div>
+
+          <div className="space-y-2">
+            {renderRoleGroup('base_', '📌 基本班別 (手動加班預設)')}
+            {renderRoleGroup('full_', '📌 正職預設工時 (自動排班預設)')}
+            {renderRoleGroup('part_', '📌 兼職預設工時 (自動排班預設)')}
+
+            {/* 自訂職位區塊 */}
+            {localShiftTimes.filter(r => !r.isSystem).length > 0 && (
+              <div className="mb-4 pt-2">
+                <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 自訂新增職位</h4>
+                <div className="grid grid-cols-1 gap-2">
+                    {localShiftTimes.filter(r => !r.isSystem).map(role => (
+                      <div key={role.id} className="flex items-center gap-2 bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
+                          <input type="text" value={role.name} onChange={e => handleUpdateRole(role.id, 'name', e.target.value)} className="w-28 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="職位名稱" />
+                          <input type="text" value={role.time} onChange={e => handleUpdateRole(role.id, 'time', e.target.value)} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-orange-500 shadow-sm" placeholder="時段" />
+                          <button onClick={() => setDeleteTarget({ type: 'role', id: role.id, name: role.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此職位">
+                             <Trash2 size={14} />
+                          </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end">
+             <button onClick={() => setSaveTarget('roles')} className="bg-orange-500 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-md shadow-orange-500/20 hover:bg-orange-600 transition-colors active:scale-95 flex items-center gap-1.5">
+               <CheckCircle size={16} /> 儲存職位時段
+             </button>
+          </div>
+        </div>
+
+        {/* 啟用排班防呆規則 */}
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50 flex justify-between items-center cursor-pointer" onClick={() => setRuleEnabled(!ruleEnabled)}>
           <div>
             <h3 className="font-bold text-[#111] text-lg">啟用排班防呆規則</h3>
@@ -1907,6 +1984,8 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 
   const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
   const viewDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const firstDayOfWeek = new Date(viewYear, viewMonth - 1, 1).getDay();
+  const emptyDays = Array.from({ length: firstDayOfWeek }, (_, i) => i);
 
   const myLeaves = employeeLeaves[currentUser] || [];
   const myShifts = shifts.filter(s => s.assignee === currentUser);
@@ -1981,6 +2060,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
               <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
             ))}
+            {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {viewDays.map((day) => {
               const dateStr = `${viewYear}/${viewMonth}/${day}`;
               const isShift = myShifts.some(s => s.date === dateStr);
