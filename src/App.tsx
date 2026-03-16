@@ -36,14 +36,21 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = (typeof window !== 'undefined' && window.__app_id) ? window.__app_id : (typeof __app_id !== 'undefined' ? __app_id : 'staff-scheduling-system');
 
+// 全局錯誤捕捉 (用於顯示 Firebase 權限問題)
+let globalSetError = null;
+
 // 雲端同步輔助函數
 const syncStateToCloud = async (firebaseUser, updates) => {
-  if (!firebaseUser) return;
+  if (!firebaseUser) {
+    if (globalSetError) globalSetError("【雲端連線失敗】尚未取得驗證授權，請確認網路或 Firebase 「匿名登入」是否已啟用。");
+    return;
+  }
   const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'schedule_data', 'main_state');
   try {
     await setDoc(docRef, updates, { merge: true });
   } catch (e) {
     console.error("雲端同步失敗: ", e);
+    if (globalSetError) globalSetError("【資料儲存被拒絕】請至 Firebase 控制台將 Firestore Rules 規則改為允許讀寫 (allow read, write: if true;)。");
   }
 };
 
@@ -51,15 +58,16 @@ const syncStateToCloud = async (firebaseUser, updates) => {
 // 1. 工具函數與核心演算法 (加入行政院假日支援)
 // ==========================================
 
+// 升級：名稱精簡化以利右上角「小字標記」顯示
 const taiwanHolidays = {
   '2026/1/1': '元旦',
   '2026/2/16': '春節', '2026/2/17': '春節', '2026/2/18': '春節', '2026/2/19': '春節', '2026/2/20': '春節', '2026/2/23': '春節', '2026/2/24': '春節',
-  '2026/2/28': '228紀念', '2026/3/2': '228補假',
-  '2026/4/3': '兒童節', '2026/4/4': '清明節', '2026/4/6': '清明補假',
-  '2026/5/1': '勞動節',
-  '2026/6/19': '端午連假', '2026/6/20': '端午節', '2026/6/21': '端午連假',
-  '2026/9/25': '中秋連假', '2026/9/26': '中秋節', '2026/9/27': '中秋連假',
-  '2026/10/9': '國慶連假', '2026/10/10': '國慶日', '2026/10/11': '國慶連假'
+  '2026/2/28': '和平', '2026/3/2': '補假',
+  '2026/4/3': '兒童', '2026/4/4': '清明', '2026/4/6': '清明',
+  '2026/5/1': '勞動',
+  '2026/6/19': '端午', '2026/6/20': '端午', '2026/6/21': '端午',
+  '2026/9/25': '中秋', '2026/9/26': '中秋', '2026/9/27': '中秋',
+  '2026/10/9': '國慶', '2026/10/10': '國慶', '2026/10/11': '國慶'
 };
 
 const getDayInfo = (year, month, day) => {
@@ -69,10 +77,18 @@ const getDayInfo = (year, month, day) => {
   const dateKey = `${year}/${month}/${day}`;
   const holidayName = taiwanHolidays[dateKey] || null;
 
+  let displayLabel = null;
+  if (holidayName) {
+    displayLabel = holidayName.substring(0, 2);
+  } else if (isWeekend) {
+    displayLabel = '假日';
+  }
+
   return {
     isWeekend,
     isHoliday: !!holidayName,
     holidayName,
+    displayLabel, // 新增：供右上角小字標記統一使用
     isOffDay: isWeekend || !!holidayName // 例假日、連假、國定假日皆視為休假日
   };
 };
@@ -292,13 +308,12 @@ function BottomNav({ role, activeScreen, onNavigate, pendingCount }) {
   );
 }
 
-function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate, onDelete, onAddLeave, onRemoveLeave }) {
+function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate, onRequestDelete, onAddLeave, onRemoveLeave }) {
   const [localName, setLocalName] = useState(user.name);
   const [localShift, setLocalShift] = useState(user.role ? user.role.substring(0, 2) : '早班');
   const [localPosition, setLocalPosition] = useState(user.role ? user.role.substring(2) : '正職');
   const [localPassword, setLocalPassword] = useState(user.password);
   const [pwdError, setPwdError] = useState('');
-  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   
   const [newLeaveMonth, setNewLeaveMonth] = useState('');
   const [newLeaveDay, setNewLeaveDay] = useState('');
@@ -342,17 +357,6 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
 
   return (
     <div className="bg-white rounded-[1.5rem] p-4 shadow-[0_4px_15px_rgb(0,0,0,0.03)] border border-gray-50 flex flex-col gap-3 transition-shadow hover:shadow-md relative overflow-hidden">
-      {/* 刪除員工防呆 */}
-      {showConfirmDelete && (
-        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-20 rounded-[1.5rem] flex flex-col items-center justify-center p-4">
-           <p className="text-sm font-bold text-red-600 mb-4">確定刪除 {localName} 嗎？此操作不可逆。</p>
-           <div className="flex gap-3 w-full">
-             <button onClick={() => setShowConfirmDelete(false)} className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm">取消</button>
-             <button onClick={() => onDelete(user.id)} className="flex-1 py-2 bg-red-50 text-white rounded-xl font-bold text-sm shadow-md">確定刪除</button>
-           </div>
-        </div>
-      )}
-
       {/* 刪除假單防呆 */}
       {leaveToDelete && (
         <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-30 rounded-[1.5rem] flex flex-col items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
@@ -368,15 +372,15 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
 
       <div className="flex items-center justify-between relative z-10">
         <div className="flex items-center gap-3 flex-1">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0 ${localRole.includes('兼職') ? 'bg-orange-500' : 'bg-[#111]'}`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0 shadow-inner ${localRole.includes('兼職') ? 'bg-[#F2823A]' : 'bg-blue-600'}`}>
             {localName.charAt(0)}
           </div>
           <div className="flex-1">
-            <input type="text" value={localName} onChange={(e) => setLocalName(e.target.value)} onBlur={handleBlur} className="w-full font-bold text-[#111] text-[15px] bg-transparent border-b border-transparent hover:border-gray-200 focus:border-blue-500 focus:outline-none transition-colors pb-1" placeholder="員工名稱" />
+            <input type="text" value={localName} onChange={(e) => setLocalName(e.target.value)} onBlur={handleBlur} className="w-full font-bold text-[#111] text-[16px] bg-transparent border-b border-transparent hover:border-gray-200 focus:border-blue-500 focus:outline-none transition-colors pb-1" placeholder="員工名稱" />
           </div>
         </div>
-        <button onClick={() => setShowConfirmDelete(true)} className="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 ml-2" title="刪除員工">
-           <Trash2 size={14} />
+        <button onClick={() => onRequestDelete(user)} className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 hover:text-red-600 transition-colors shrink-0 ml-2 shadow-sm" title="刪除員工">
+           <Trash2 size={18} />
         </button>
       </div>
 
@@ -686,7 +690,7 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
         <div className="px-8 mb-8">
           <div className="grid grid-cols-7 gap-x-2 gap-y-3">
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
-              <div key={d} className="text-center text-[10px] font-bold text-gray-400 mb-1">{d}</div>
+              <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-blue-500' : 'text-gray-400'}`}>{d}</div>
             ))}
             {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {viewDays.map((day) => {
@@ -704,13 +708,21 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
               else if (myLeaveToday) btnClass = myLeaveToday.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-green-50 text-green-600 border border-green-100';
               else if (hasShift) btnClass = 'bg-blue-50/50 text-blue-700 hover:bg-blue-100 font-bold';
               else if (isUnderstaffed) btnClass = 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100';
-              else if (info.isOffDay) btnClass = 'bg-red-50/30 text-red-500';
+              else if (info.isOffDay) btnClass = 'bg-blue-50/30 text-blue-500 hover:bg-blue-100';
 
               return (
                 <button key={day} onClick={() => setSelectedHomeDate(dateStr)} className={`relative w-full aspect-square rounded-2xl flex flex-col items-center justify-center transition-all duration-200 ${btnClass}`}>
-                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700'))}`}>{day}</span>
-                  {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
-                  {isUnderstaffed && !myLeaveToday && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full shadow-sm border-2 border-white z-20"></div>}
+                  <span className={`text-[15px] font-bold ${isSelected ? 'text-white' : (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700'))}`}>{day}</span>
+                  
+                  {/* 升級：國定假日/連假/例假日 右上角小字標記 */}
+                  {info.displayLabel && (
+                    <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${isSelected ? 'text-white/90' : 'text-blue-600'}`}>
+                      {info.displayLabel}
+                    </span>
+                  )}
+
+                  {/* 升級：防止缺人紅點擋住小字，若有小字則紅點移到左上 */}
+                  {isUnderstaffed && !myLeaveToday && <div className={`absolute top-1.5 ${info.displayLabel ? 'left-1.5' : 'right-1.5'} w-2 h-2 bg-red-500 rounded-full shadow-sm border-2 border-white z-20`}></div>}
                   {!isUnderstaffed && hasShift && !isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                   {hasShift && isSelected && !myLeaveToday && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
                 </button>
@@ -722,9 +734,9 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
         <div className="px-8">
           <div className="flex items-center gap-2 mb-6 border-b border-gray-100 pb-2">
             <h3 className="text-sm font-bold text-[#111] tracking-wide">{selectedHomeDate.split('/')[1]}/{selectedHomeDate.split('/')[2]} <span className="text-gray-400 font-medium">當日時段班表</span></h3>
-            {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).isHoliday && (
-               <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-md border border-red-100 ml-2">
-                 {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).holidayName}
+            {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).isOffDay && (
+               <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 ml-2">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedHomeDate.split('/')[2])).holidayName || '例假日'}
                </span>
             )}
           </div>
@@ -993,7 +1005,7 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
         </div>
         <div className="grid grid-cols-7 gap-x-2 gap-y-3">
           {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
-            <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
+            <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-blue-500' : 'text-gray-400'}`}>{d}</div>
           ))}
           {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
           {viewDays.map((day) => {
@@ -1004,12 +1016,19 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
 
             let btnClass = 'bg-gray-50 text-gray-600 hover:bg-gray-100';
             if (isSelected) btnClass = 'bg-[#111] text-white shadow-lg transform scale-110 z-10';
-            else if (info.isOffDay) btnClass = 'bg-red-50/30 text-red-500';
+            else if (info.isOffDay) btnClass = 'bg-blue-50/30 text-blue-500 hover:bg-blue-100';
 
             return (
               <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 font-bold text-sm ${btnClass}`}>
-                <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700'))}`}>{day}</span>
-                {info.isHoliday && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
+                <span className={`${isSelected ? 'text-white' : (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700'))}`}>{day}</span>
+                
+                {/* 升級：右上角小字標記 */}
+                {info.displayLabel && (
+                  <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${isSelected ? 'text-white/90' : 'text-blue-600'}`}>
+                    {info.displayLabel}
+                  </span>
+                )}
+
                 {hasShift && !isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-blue-500"></div>}
                 {hasShift && isSelected && <div className="absolute bottom-1.5 w-1 h-1 rounded-full bg-white shadow-sm"></div>}
               </button>
@@ -1051,9 +1070,9 @@ function ScheduleEditorScreen({ shifts, registeredUsers, employeeLeaves, timeBlo
             <h3 className="text-xs font-bold text-gray-500 flex items-center gap-1.5">
               <CheckCircle size={14} className="text-blue-500"/> {activeTab} - 已排班人員
             </h3>
-            {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isHoliday && (
-               <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-md border border-red-100">
-                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName}
+            {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isOffDay && (
+               <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName || '例假日'}
                </span>
             )}
           </div>
@@ -1209,6 +1228,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
 function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave }) {
   const [filterShift, setFilterShift] = useState('全部');
   const [filterPosition, setFilterPosition] = useState('全部');
+  const [userToDelete, setUserToDelete] = useState(null); // 全螢幕防呆 Modal 狀態
 
   const stats = [
     { id: 'total', label: '總人數', count: registeredUsers.length, bg: 'bg-[#111]', text: 'text-gray-300', shadow: 'shadow-black/10', icon: <Users size={48} />, span: 'col-span-2' },
@@ -1226,6 +1246,31 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
 
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f5f6f8] pb-32 animate-in slide-in-from-bottom-8 duration-300 relative">
+      
+      {/* 升級版：全螢幕防呆刪除確認 Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setUserToDelete(null)}></div>
+          <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm relative z-10 shadow-2xl animate-in zoom-in-95 duration-200 border border-red-100">
+            <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-4 mx-auto border-4 border-white shadow-sm">
+              <AlertCircle size={28} strokeWidth={2.5} />
+            </div>
+            <h3 className="text-xl font-extrabold text-[#111] mb-2 text-center">確認刪除員工？</h3>
+            <p className="text-sm text-gray-600 mb-6 leading-relaxed bg-red-50 p-4 rounded-xl border border-red-100">
+              【防呆警告】確定要刪除員工「<strong className="text-red-600 text-base">{userToDelete.name}</strong>」嗎？<br/><br/>
+              此操作將會<strong className="text-red-600">永久清除</strong>該員工所有的排班與假單紀錄，且<strong className="text-red-600 underline">無法還原</strong>！請確認您沒有點錯人。
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setUserToDelete(null)} className="flex-1 py-3.5 rounded-2xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">取消</button>
+              <button onClick={() => {
+                onDeleteEmployee(userToDelete.id);
+                setUserToDelete(null);
+              }} className="flex-1 py-3.5 rounded-2xl bg-red-500 text-white font-bold hover:bg-red-600 shadow-md shadow-red-500/20 transition-colors">確認刪除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="sticky top-0 bg-[#f5f6f8]/90 backdrop-blur-md z-10 flex items-center px-8 pt-12 pb-4 border-b border-gray-200/50">
         <button onClick={onBack} className="p-2 -ml-2 text-gray-800 hover:bg-gray-200 rounded-full transition mr-4"><ChevronLeft size={28} strokeWidth={2} /></button>
         <div>
@@ -1280,7 +1325,7 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
             <EmployeeEditCard 
               key={user.id} user={user} allUsers={registeredUsers} 
               userLeaves={employeeLeaves[user.name] || []} leaveSettings={leaveSettings}
-              onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} 
+              onUpdate={onUpdateEmployee} onRequestDelete={setUserToDelete} 
               onAddLeave={onAddLeave} onRemoveLeave={onRemoveLeave}
             />
           ))
@@ -1446,7 +1491,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-orange-500"></div><span className="text-orange-600">待主管審核</span></div>
           </div>
           <div className="flex flex-col gap-3 text-xs font-bold text-gray-500">
-            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-red-50 border border-red-200"></div><span className="text-red-500">易生衝突</span></div>
+            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-red-50 border border-red-200"></div><span className="text-red-500">相同排休</span></div>
             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-gray-50 border border-gray-200"></div><span>尚有名額</span></div>
           </div>
         </div>
@@ -1464,7 +1509,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 mb-8">
           <div className="grid grid-cols-7 gap-x-2 gap-y-3">
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
-              <div key={d} className={`text-center text-[10px] font-bold mb-2 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
+              <div key={d} className={`text-center text-[10px] font-bold mb-2 ${d === '日' || d === '六' ? 'text-blue-500' : 'text-gray-400'}`}>{d}</div>
             ))}
             {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {marchDays.map((day) => {
@@ -1483,7 +1528,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
               } else if (bookedCount > 0) {
                 btnClass = 'bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 font-bold';
               } else if (info.isOffDay) {
-                btnClass = 'bg-red-50/30 text-red-500 hover:bg-red-100 border-transparent';
+                btnClass = 'bg-blue-50/30 text-blue-500 hover:bg-blue-100 border-transparent';
               }
 
               // 鎖定狀態下，按鈕透明度降低
@@ -1491,8 +1536,14 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
               return (
                 <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted || isLocked} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${lockedStyle}`}>
-                  <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700')) : ''}`}>{day}</span>
-                  {info.isHoliday && !myLeave && !isFull && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
+                  <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700')) : ''}`}>{day}</span>
+                  
+                  {/* 升級：右上角小字標記 */}
+                  {info.displayLabel && (
+                    <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${myLeave ? 'text-white/90' : (isFull ? 'text-red-500' : 'text-blue-600')}`}>
+                      {info.displayLabel}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -2058,7 +2109,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 
            <div className="grid grid-cols-7 gap-x-2 gap-y-3">
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
-              <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-orange-500' : 'text-gray-400'}`}>{d}</div>
+              <div key={d} className={`text-center text-[10px] font-bold mb-1 ${d === '日' || d === '六' ? 'text-blue-500' : 'text-gray-400'}`}>{d}</div>
             ))}
             {emptyDays.map((_, i) => <div key={`empty-${i}`} />)}
             {viewDays.map((day) => {
@@ -2074,13 +2125,19 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
               } else if (isShift) {
                  btnClass = 'bg-blue-50 text-blue-600 border border-blue-200 font-bold';
               } else if (info.isOffDay) {
-                 btnClass = 'bg-red-50/30 text-red-500 hover:bg-red-100';
+                 btnClass = 'bg-blue-50/30 text-blue-500 hover:bg-blue-100';
               }
 
               return (
                 <button key={day} onClick={() => setSelectedDate(dateStr)} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${isSelected ? 'ring-2 ring-[#111] ring-offset-2 transform scale-105 z-10 shadow-md' : ''}`}>
-                  <span className={`text-[14px] font-bold ${(!leaveInfo && !isShift) ? (info.isHoliday ? 'text-red-600' : (info.isWeekend ? 'text-orange-500' : 'text-gray-700')) : ''}`}>{day}</span>
-                  {info.isHoliday && !leaveInfo && !isShift && <span className="absolute top-1 right-1 text-[8px] text-red-500 font-black tracking-tighter leading-none">{info.holidayName.substring(0,2)}</span>}
+                  <span className={`text-[14px] font-bold ${(!leaveInfo && !isShift) ? (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700')) : ''}`}>{day}</span>
+                  
+                  {/* 升級：右上角小字標記 */}
+                  {info.displayLabel && (
+                    <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${leaveInfo ? (leaveInfo.status === 'pending' ? 'text-orange-600' : 'text-green-600') : 'text-blue-600'}`}>
+                      {info.displayLabel}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -2096,9 +2153,9 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
              <h3 className="text-sm font-bold text-gray-400 flex items-center gap-2">
                <CalendarCheck size={16} /> {selectedDate.split('/')[1]}/{selectedDate.split('/')[2]} 詳細資訊
              </h3>
-             {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isHoliday && (
-               <span className="text-[10px] font-black text-red-500 bg-red-500/20 px-2 py-0.5 rounded-md border border-red-500/30">
-                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName}
+             {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).isOffDay && (
+               <span className="text-[10px] font-black text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded-md border border-blue-500/30">
+                 {getDayInfo(viewYear, viewMonth, parseInt(selectedDate.split('/')[2])).holidayName || '例假日'}
                </span>
              )}
            </div>
@@ -2144,6 +2201,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 }
 
 export default function App() {
+  const [systemError, setSystemError] = useState('');
   const [activeScreen, setActiveScreen] = useState('login');
   const [selectedShift, setSelectedShift] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -2160,6 +2218,15 @@ export default function App() {
   const [shiftTimes, setShiftTimes] = useState(initialShiftTimes);
   const [businessHours, setBusinessHours] = useState(initialBusinessHours);
 
+  // 掛載全局錯誤處理函數
+  useEffect(() => {
+    globalSetError = (msg) => {
+      setSystemError(msg);
+      setTimeout(() => setSystemError(''), 10000); // 10秒後自動消失
+    };
+    return () => { globalSetError = null; };
+  }, []);
+
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -2170,7 +2237,10 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (error) { console.error("Firebase Auth Error", error); }
+      } catch (error) { 
+        console.error("Firebase Auth Error", error);
+        if (globalSetError) globalSetError("【身份驗證失敗】請至 Firebase 控制台 Authentication 啟用「匿名登入 (Anonymous)」。");
+      }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setFirebaseUser);
@@ -2204,7 +2274,10 @@ export default function App() {
           businessHours: initialBusinessHours
         }, { merge: true });
       }
-    }, (err) => console.error("Snapshot error", err));
+    }, (err) => {
+        console.error("Snapshot error", err);
+        if (globalSetError) globalSetError("【讀取資料失敗】無權限讀取資料庫，請檢查 Firebase Firestore Rules 設定是否為 allow read, write: if true;！");
+    });
     
     return () => unsub();
   }, [firebaseUser]);
@@ -2517,6 +2590,17 @@ export default function App() {
     <div className="h-[100dvh] w-full sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-200 sm:shadow-2xl bg-[#f5f6f8] font-sans overflow-hidden relative flex flex-col">
       <style dangerouslySetInnerHTML={{ __html: `.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }` }} />
       
+      {/* 雲端連線異常偵測 UI */}
+      {systemError && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] w-11/12 max-w-md animate-in slide-in-from-top-4">
+          <div className="bg-red-500 text-white p-4 rounded-2xl shadow-2xl font-bold text-sm flex items-start gap-3 border border-red-400">
+            <AlertCircle size={24} className="shrink-0 mt-0.5" />
+            <p className="leading-relaxed drop-shadow-sm">{systemError}</p>
+            <button onClick={() => setSystemError('')} className="ml-auto bg-white/20 rounded-full p-1 hover:bg-white/30"><X size={16} /></button>
+          </div>
+        </div>
+      )}
+
       {activeScreen === 'login' && <LoginScreen onLogin={handleLoginSuccess} onGoRegister={() => setActiveScreen('register')} registeredUsers={registeredUsers} />}
       {activeScreen === 'register' && <RegisterScreen onGoLogin={() => setActiveScreen('login')} registeredUsers={registeredUsers} onRegister={onRegisterNew} />}
       
@@ -2528,7 +2612,7 @@ export default function App() {
       
       {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
       
-      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
+      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
       
       {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftTimes={shiftTimes} onUpdateShiftTimes={handleUpdateShiftTimes} timeBlockDemands={timeBlockDemands} onUpdateTimeBlockDemands={handleUpdateTimeBlockDemands} businessHours={businessHours} onUpdateBusinessHours={handleUpdateBusinessHours} />}
       
