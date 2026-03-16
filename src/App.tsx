@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search, ChevronLeft, ChevronRight, Home, User, Calendar as CalendarIcon,
   CalendarCheck, Plus, Users, Briefcase, Clock, ShieldCheck, RefreshCw,
@@ -102,19 +102,33 @@ const getDemandForHour = (hour, isWeekend, demands) => {
   return isWeekend ? block.reqWeekend : block.reqWeekday;
 };
 
-const getRoleDefaultTime = (role, isWeekend, shiftCategory) => {
-  if (shiftCategory === '早班') return '11:00 - 15:00 & 17:00 - 22:00';
-  if (shiftCategory === '晚班') return '15:00 - 00:00';
-  if (shiftCategory === '留守') return '11:00 - 22:00';
+// 新增：系統預設班別與職位時間參數
+const initialShiftTimes = {
+  base_morning: '11:00 - 15:00 & 17:00 - 22:00',
+  base_night: '15:00 - 00:00',
+  base_stay: '11:00 - 22:00',
+  full_morning: '11:00 - 15:00 & 17:00 - 22:00',
+  full_night: '15:00 - 00:00',
+  part_morning_weekday: '11:00 - 15:00',
+  part_morning_weekend: '11:00 - 15:00 & 17:00 - 22:00',
+  part_morning_weekend_alt: '11:00 - 20:00', // 自動排班調度用
+  part_night_weekday: '18:00 - 22:00',
+  part_night_weekend: '11:00 - 15:00 & 17:00 - 22:00',
+};
+
+const getRoleDefaultTime = (role, isWeekend, shiftCategory, shiftTimes = initialShiftTimes) => {
+  if (shiftCategory === '早班') return shiftTimes.base_morning;
+  if (shiftCategory === '晚班') return shiftTimes.base_night;
+  if (shiftCategory === '留守') return shiftTimes.base_stay;
 
   const isPartTime = role.includes('兼職');
   const isMorning = role.includes('早班');
   if (isPartTime) {
     return isMorning 
-      ? (isWeekend ? '11:00 - 15:00 & 17:00 - 22:00' : '11:00 - 15:00')
-      : (isWeekend ? '11:00 - 15:00 & 17:00 - 22:00' : '18:00 - 22:00');
+      ? (isWeekend ? shiftTimes.part_morning_weekend : shiftTimes.part_morning_weekday)
+      : (isWeekend ? shiftTimes.part_night_weekend : shiftTimes.part_night_weekday);
   } else {
-    return isMorning ? '11:00 - 15:00 & 17:00 - 22:00' : '15:00 - 00:00';
+    return isMorning ? shiftTimes.full_morning : shiftTimes.full_night;
   }
 };
 
@@ -129,7 +143,7 @@ const isDayUnderstaffed = (dateStr, isWeekend, shifts, demands) => {
   return false;
 };
 
-const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveDays, targetYear, targetMonth) => {
+const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveDays, targetYear, targetMonth, shiftTimes = initialShiftTimes) => {
   if (!user.role) return [];
   const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
   const isLeave = Array(daysInMonth).fill(false);
@@ -173,7 +187,7 @@ const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveD
       const dayStr = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][dayOfWeek];
       
       const info = getDayInfo(targetYear, targetMonth, dayNum);
-      const exactTime = getRoleDefaultTime(user.role, info.isOffDay, null);
+      const exactTime = getRoleDefaultTime(user.role, info.isOffDay, null, shiftTimes);
       const shiftCat = user.role.includes('晚班') ? '晚班' : '早班';
 
       newShifts.push({
@@ -1464,15 +1478,20 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
   );
 }
 
-function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement }) {
+function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSettings, onUpdateLeaveSettings, announcement, onUpdateAnnouncement, shiftTimes, onUpdateShiftTimes }) {
   const [localAnnouncement, setLocalAnnouncement] = useState(announcement);
   const [localLeaveSettings, setLocalLeaveSettings] = useState(leaveSettings || { year: 2026, month: 3, total: 8, weekend: 1, weekday: 7 });
+  const [localShiftTimes, setLocalShiftTimes] = useState(shiftTimes || initialShiftTimes);
   const [isSyncing, setIsSyncing] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
   useEffect(() => {
     if (leaveSettings) setLocalLeaveSettings(leaveSettings);
   }, [leaveSettings]);
+
+  useEffect(() => {
+    if (shiftTimes) setLocalShiftTimes(shiftTimes);
+  }, [shiftTimes]);
 
   const handleSyncGov = () => {
     setIsSyncing(true);
@@ -1500,6 +1519,7 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
   const handleSaveAll = () => {
     onUpdateAnnouncement(localAnnouncement);
     onUpdateLeaveSettings(localLeaveSettings);
+    if (onUpdateShiftTimes) onUpdateShiftTimes(localShiftTimes);
     setToastMsg('設定已全面儲存並發佈');
     setTimeout(() => setToastMsg(''), 3000);
   };
@@ -1587,6 +1607,73 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
           >
              {toastMsg ? <><CheckCircle size={18} className="text-green-400" /> {toastMsg}</> : '儲存所有設定並發佈'}
           </button>
+        </div>
+
+        {/* 新增：班別與職位時間設定 */}
+        <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+          <div className="flex items-center gap-3 mb-5 border-b border-gray-50 pb-4">
+            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Clock size={20} strokeWidth={2.5} /></div>
+            <div>
+              <h3 className="font-bold text-[#111] text-lg">班別與職位時間設定</h3>
+              <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Shift & Role Time Config</p>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <div>
+               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 基本班別 (手動加班預設)</h4>
+               <div className="grid grid-cols-1 gap-2">
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-20">早班</span>
+                      <input type="text" value={localShiftTimes.base_morning} onChange={e => setLocalShiftTimes({...localShiftTimes, base_morning: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-20">晚班</span>
+                      <input type="text" value={localShiftTimes.base_night} onChange={e => setLocalShiftTimes({...localShiftTimes, base_night: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-20">留守</span>
+                      <input type="text" value={localShiftTimes.base_stay} onChange={e => setLocalShiftTimes({...localShiftTimes, base_stay: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+               </div>
+            </div>
+
+            <div>
+               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 正職預設工時 (自動排班)</h4>
+               <div className="grid grid-cols-1 gap-2">
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-20">早班正職</span>
+                      <input type="text" value={localShiftTimes.full_morning} onChange={e => setLocalShiftTimes({...localShiftTimes, full_morning: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-20">晚班正職</span>
+                      <input type="text" value={localShiftTimes.full_night} onChange={e => setLocalShiftTimes({...localShiftTimes, full_night: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+               </div>
+            </div>
+
+            <div>
+               <h4 className="text-xs font-bold text-gray-500 mb-2 border-b border-gray-100 pb-1">📌 兼職預設工時 (自動排班)</h4>
+               <div className="grid grid-cols-1 gap-2">
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-24">早班兼職(平日)</span>
+                      <input type="text" value={localShiftTimes.part_morning_weekday} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekday: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-24">晚班兼職(平日)</span>
+                      <input type="text" value={localShiftTimes.part_night_weekday} onChange={e => setLocalShiftTimes({...localShiftTimes, part_night_weekday: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-24">兼職(假日)</span>
+                      <input type="text" value={localShiftTimes.part_morning_weekend} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekend: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" />
+                   </div>
+                   <div className="flex items-center justify-between bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 w-24">兼職(假日替代)</span>
+                      <input type="text" value={localShiftTimes.part_morning_weekend_alt} onChange={e => setLocalShiftTimes({...localShiftTimes, part_morning_weekend_alt: e.target.value})} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" placeholder="用於排班調度" />
+                   </div>
+               </div>
+            </div>
+          </div>
         </div>
 
         <div className="bg-white rounded-[2rem] p-6 shadow-[0_8px_20px_rgb(0,0,0,0.03)] border border-gray-50 flex justify-between items-center cursor-pointer" onClick={() => setRuleEnabled(!ruleEnabled)}>
@@ -1802,6 +1889,7 @@ export default function App() {
   const [leaveSettings, setLeaveSettings] = useState(initialLeaveSettings);
   const [shifts, setShifts] = useState(() => generateInitialShifts());
   const [announcement, setAnnouncement] = useState(DEFAULT_ANNOUNCEMENT);
+  const [shiftTimes, setShiftTimes] = useState(initialShiftTimes);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -1833,6 +1921,7 @@ export default function App() {
         if (data.demands) setTimeBlockDemands(data.demands);
         if (data.announcement !== undefined) setAnnouncement(data.announcement);
         if (data.leaveSettings !== undefined) setLeaveSettings(data.leaveSettings);
+        if (data.shiftTimes !== undefined) setShiftTimes(data.shiftTimes);
       } else {
         setDoc(docRef, {
           users: initialRegisteredUsers,
@@ -1840,7 +1929,8 @@ export default function App() {
           leaves: initialLeavesMap,
           demands: initialTimeBlockDemands,
           announcement: DEFAULT_ANNOUNCEMENT,
-          leaveSettings: initialLeaveSettings
+          leaveSettings: initialLeaveSettings,
+          shiftTimes: initialShiftTimes
         }, { merge: true });
       }
     }, (err) => console.error("Snapshot error", err));
@@ -1932,6 +2022,11 @@ export default function App() {
     syncStateToCloud(firebaseUser, { leaveSettings: newSettings });
   };
 
+  const handleUpdateShiftTimes = (newSettings) => {
+    setShiftTimes(newSettings);
+    syncStateToCloud(firebaseUser, { shiftTimes: newSettings });
+  };
+
   const handleApproveLeave = (emp, date) => {
     const updatedLeaves = employeeLeaves[emp].map(l => l.date === date ? { ...l, status: 'approved', managerHandled: true } : l);
     updateAndSyncLeaves(emp, updatedLeaves);
@@ -2015,7 +2110,7 @@ export default function App() {
     const newShift = {
       id: `manual_${Date.now()}_${Math.random().toString(36).substring(2,7)}`,
       date: dateStr, day: dayStr, type: user.role, shiftCategory: shiftCategory, 
-      time: getRoleDefaultTime(user.role, info.isOffDay, shiftCategory), assignee: userName, status: 'confirmed'
+      time: getRoleDefaultTime(user.role, info.isOffDay, shiftCategory, shiftTimes), assignee: userName, status: 'confirmed'
     };
     
     const newShifts = [...shifts, newShift];
@@ -2037,7 +2132,7 @@ export default function App() {
     
     registeredUsers.forEach(u => {
         const leaves = employeeLeaves[u.name] || [];
-        const userShifts = generateFullScheduleForUser(u, leaves, ruleEnabled, autoScheduleDaysLimit, targetY, targetM);
+        const userShifts = generateFullScheduleForUser(u, leaves, ruleEnabled, autoScheduleDaysLimit, targetY, targetM, shiftTimes);
         allShifts = [...allShifts, ...userShifts];
     });
 
@@ -2070,12 +2165,12 @@ export default function App() {
                 const dem18 = getDemandForHour(18, false, timeBlockDemands);
                 const cov18 = getCoverage(18);
 
-                if (shift.time === '11:00 - 15:00' && cov11 > dem11 && cov18 < dem18) {
-                shift.time = '18:00 - 22:00';
+                if (shift.time === shiftTimes.part_morning_weekday && cov11 > dem11 && cov18 < dem18) {
+                shift.time = shiftTimes.part_night_weekday;
                 shift.shiftCategory = '晚班';
                 changed = true;
-                } else if (shift.time === '18:00 - 22:00' && cov18 > dem18 && cov11 < dem11) {
-                shift.time = '11:00 - 15:00';
+                } else if (shift.time === shiftTimes.part_night_weekday && cov18 > dem18 && cov11 < dem11) {
+                shift.time = shiftTimes.part_morning_weekday;
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
@@ -2088,15 +2183,15 @@ export default function App() {
             const dem17 = getDemandForHour(17, true, timeBlockDemands);
             const cov17 = getCoverage(17);
 
-            if (shift.time === '11:00 - 15:00 & 17:00 - 22:00') {
+            if (shift.time === shiftTimes.part_morning_weekend) {
                 if (cov17 > dem17 && cov15 < dem15) {
-                shift.time = '11:00 - 20:00';
+                shift.time = shiftTimes.part_morning_weekend_alt;
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
-            } else if (shift.time === '11:00 - 20:00') {
+            } else if (shift.time === shiftTimes.part_morning_weekend_alt) {
                 if (cov15 > dem15 && cov17 < dem17) {
-                shift.time = '11:00 - 15:00 & 17:00 - 22:00';
+                shift.time = shiftTimes.part_morning_weekend;
                 shift.shiftCategory = '早班';
                 changed = true;
                 }
@@ -2152,7 +2247,7 @@ export default function App() {
       
       {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDelete={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
       
-      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} />}
+      {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftTimes={shiftTimes} onUpdateShiftTimes={handleUpdateShiftTimes} />}
       
       {activeScreen === 'employee_profile' && <EmployeeProfileScreen currentUser={currentUser} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} shifts={shifts} leaveSettings={leaveSettings} />}
       
