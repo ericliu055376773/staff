@@ -368,7 +368,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
       return;
     }
     if (allUsers.some((u) => u.password === localPassword && u.id !== user.id)) {
-      setPwdError('密碼已重複');
+      setPwdError('此密碼有人註冊');
       setLocalPassword(user.password);
       return;
     }
@@ -531,7 +531,7 @@ function LoginScreen({ onLogin, onGoRegister, registeredUsers }) {
   );
 }
 
-function RegisterScreen({ onGoLogin, onRegister }) {
+function RegisterScreen({ onGoLogin, onRegister, registeredUsers }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -546,6 +546,11 @@ function RegisterScreen({ onGoLogin, onRegister }) {
     if (!name.trim()) { setError('姓氏/姓名為必填欄位'); return; }
     if (!/^\d{6}$/.test(password)) { setError('註冊密碼必須為 6 位數字'); return; }
     if (password !== confirmPassword) { setError('兩次輸入的密碼不一致'); return; }
+    
+    if (registeredUsers && registeredUsers.some(u => u.password === password)) {
+      setError('此密碼有人註冊');
+      return;
+    }
     
     const finalRole = `${shift}${position}`;
     const result = onRegister(name.trim(), password, finalRole);
