@@ -300,6 +300,7 @@ const initialTimeBlockDemands = [
 const initialBusinessHours = "11:00 - 00:00";
 const initialRegisteredUsers = []; 
 const initialLeavesMap = {}; 
+const initialNotesMap = {}; // 備註狀態
 const generateInitialShifts = () => { return []; };
 const initialLeaveSettings = { year: 2026, month: 3, total: 10, weekend: 4, weekday: 6, lockDate: 20 };
 const DEFAULT_ANNOUNCEMENT = `系統排休規則：\n為確保公平性，請依據系統當前設定之額度自行劃定排休。\n（假單送出後，系統將會自動依您的身分為您排滿剩餘的工作日！）`;
@@ -346,7 +347,7 @@ function BottomNav({ role, activeScreen, onNavigate, pendingCount }) {
   );
 }
 
-function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate, onRequestDelete, onAddLeave, onRemoveLeave }) {
+function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote, onUpdate, onRequestDelete, onAddLeave, onRemoveLeave }) {
   const [localName, setLocalName] = useState(user.name);
   const [localShift, setLocalShift] = useState(user.role ? user.role.substring(0, 2) : '早班');
   const [localPosition, setLocalPosition] = useState(user.role ? user.role.substring(2) : '正職');
@@ -478,6 +479,16 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, onUpdate,
             <span className="text-[10px] text-gray-400 font-medium px-1">尚未排假</span>
           )}
         </div>
+        
+        {/* 新增：員工備註顯示卡片 */}
+        {userNote && (
+          <div className="mt-1 pt-3 border-t border-gray-200 border-dashed">
+            <span className="text-[10px] font-bold text-gray-400 flex items-center gap-1.5 mb-2"><AlignLeft size={12}/> 員工備註</span>
+            <div className="bg-white p-3 rounded-xl border border-gray-100 text-xs text-gray-700 font-bold leading-relaxed shadow-sm">
+              {userNote}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1268,7 +1279,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   );
 }
 
-function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave }) {
+function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, employeeNotes, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave }) {
   const [filterShift, setFilterShift] = useState('全部');
   const [filterPosition, setFilterPosition] = useState('全部');
   const [userToDelete, setUserToDelete] = useState(null); // 全螢幕防呆 Modal 狀態
@@ -1368,6 +1379,7 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
             <EmployeeEditCard 
               key={user.id} user={user} allUsers={registeredUsers} 
               userLeaves={employeeLeaves[user.name] || []} leaveSettings={leaveSettings}
+              userNote={employeeNotes[user.name] || ''}
               onUpdate={onUpdateEmployee} onRequestDelete={setUserToDelete} 
               onAddLeave={onAddLeave} onRemoveLeave={onRemoveLeave}
             />
@@ -1383,9 +1395,12 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
   );
 }
 
-function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings, onSaveLeaves, announcement, onLogout }) {
+function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes, leaveSettings, onSaveLeaves, announcement, onLogout }) {
   const initialLeaves = employeeLeaves[currentUser] || [];
+  const initialNote = employeeNotes[currentUser] || '';
+  
   const [selectedLeaves, setSelectedLeaves] = useState(initialLeaves);
+  const [localNote, setLocalNote] = useState(initialNote);
   const [isSubmitted, setIsSubmitted] = useState(false); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [warningMsg, setWarningMsg] = useState('');
@@ -1474,7 +1489,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
 
   const confirmSubmit = () => {
     setIsSubmitted(true);
-    onSaveLeaves(currentUser, selectedLeaves);
+    onSaveLeaves(currentUser, selectedLeaves, localNote);
     setShowConfirmModal(false);
   };
 
@@ -1549,7 +1564,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 mb-8">
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 mb-6">
           <div className="grid grid-cols-7 gap-x-2 gap-y-3">
             {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
               <div key={d} className={`text-center text-[10px] font-bold mb-2 ${d === '日' || d === '六' ? 'text-blue-500' : 'text-gray-400'}`}>{d}</div>
@@ -1593,6 +1608,22 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
           </div>
         </div>
 
+        {/* 新增：員工排休備註卡片 */}
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 mb-8">
+           <div className="flex items-center gap-2 mb-3 ml-1">
+             <AlignLeft size={16} className="text-blue-500" />
+             <h3 className="text-sm font-bold text-[#111]">排休備註 <span className="text-gray-400 text-xs font-medium ml-1">(選填)</span></h3>
+           </div>
+           <textarea
+             value={localNote}
+             onChange={e => setLocalNote(e.target.value)}
+             disabled={isSubmitted || isLocked}
+             placeholder={isLocked ? "系統已鎖定，無法新增或修改備註" : "請輸入您的排休備註或特殊需求..."}
+             className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-sm font-bold text-gray-700 outline-none focus:border-blue-500 focus:bg-white transition-all resize-none shadow-sm disabled:opacity-60 disabled:bg-gray-100"
+             rows={3}
+           />
+        </div>
+
         <div className="w-full">
           {isLocked ? (
              <div className="w-full bg-gray-100 text-gray-400 py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm border border-gray-200 cursor-not-allowed">
@@ -1604,9 +1635,9 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, leaveSettings
             </div>
           ) : (
             <button
-              onClick={() => { if (selectedLeaves.length > 0) setShowConfirmModal(true); }}
+              onClick={() => { if (selectedLeaves.length > 0 || localNote) setShowConfirmModal(true); }}
               className={`w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-lg transition-all active:scale-[0.98] ${
-                selectedLeaves.length > 0 ? 'bg-[#2563EB] text-white shadow-blue-600/30 hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
+                selectedLeaves.length > 0 || localNote ? 'bg-[#2563EB] text-white shadow-blue-600/30 hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
               }`}
             >
               發送假單 ({monthLeavesCount} / {MAX_LEAVES} 天)
@@ -2116,7 +2147,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
         {/* 個人資訊卡片 */}
         <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl shrink-0 shadow-inner ${getRoleStyles(user.role)}`}>
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-inner shrink-0 ${getRoleStyles(user.role)}`}>
               {user.name.charAt(0)}
             </div>
             <div className="flex flex-col gap-0.5">
@@ -2254,6 +2285,7 @@ export default function App() {
   const [registeredUsers, setRegisteredUsers] = useState(initialRegisteredUsers);
   const [timeBlockDemands, setTimeBlockDemands] = useState(initialTimeBlockDemands);
   const [employeeLeaves, setEmployeeLeaves] = useState(initialLeavesMap);
+  const [employeeNotes, setEmployeeNotes] = useState(initialNotesMap);
   const [ruleEnabled, setRuleEnabled] = useState(true); 
   const [leaveSettings, setLeaveSettings] = useState(initialLeaveSettings);
   const [shifts, setShifts] = useState(() => generateInitialShifts());
@@ -2305,6 +2337,7 @@ export default function App() {
         if (data.leaveSettings !== undefined) setLeaveSettings(data.leaveSettings);
         if (data.shiftTimes !== undefined) setShiftTimes(normalizeShiftTimes(data.shiftTimes));
         if (data.businessHours !== undefined) setBusinessHours(data.businessHours);
+        if (data.notes !== undefined) setEmployeeNotes(data.notes);
       } else {
         setDoc(docRef, {
           users: initialRegisteredUsers,
@@ -2314,7 +2347,8 @@ export default function App() {
           announcement: DEFAULT_ANNOUNCEMENT,
           leaveSettings: initialLeaveSettings,
           shiftTimes: initialShiftTimes,
-          businessHours: initialBusinessHours
+          businessHours: initialBusinessHours,
+          notes: initialNotesMap
         }, { merge: true });
       }
     }, (err) => {
@@ -2362,10 +2396,18 @@ export default function App() {
         newLeaves[newName] = newLeaves[oldName];
         delete newLeaves[oldName];
       }
+      
+      const newNotes = { ...employeeNotes };
+      if (newNotes[oldName]) {
+        newNotes[newName] = newNotes[oldName];
+        delete newNotes[oldName];
+      }
+      
       setEmployeeLeaves(newLeaves);
+      setEmployeeNotes(newNotes);
       const newShifts = shifts.map(s => s.assignee === oldName ? { ...s, assignee: newName, type: newRole } : s);
       setShifts(newShifts);
-      syncStateToCloud(firebaseUser, { users: updatedUsers, leaves: newLeaves, shifts: newShifts });
+      syncStateToCloud(firebaseUser, { users: updatedUsers, leaves: newLeaves, notes: newNotes, shifts: newShifts });
       if (currentUser === oldName) setCurrentUser(newName);
     } else {
       const newShifts = shifts.map(s => s.assignee === oldName ? { ...s, type: newRole } : s);
@@ -2380,15 +2422,21 @@ export default function App() {
     const userName = userToDelete.name;
 
     const newUsers = registeredUsers.filter((u) => u.id !== userId);
+    
     const newLeaves = { ...employeeLeaves };
     delete newLeaves[userName];
+    
+    const newNotes = { ...employeeNotes };
+    delete newNotes[userName];
+    
     const newShifts = shifts.filter((s) => s.assignee !== userName);
 
     setRegisteredUsers(newUsers);
     setEmployeeLeaves(newLeaves);
+    setEmployeeNotes(newNotes);
     setShifts(newShifts);
     
-    syncStateToCloud(firebaseUser, { users: newUsers, leaves: newLeaves, shifts: newShifts });
+    syncStateToCloud(firebaseUser, { users: newUsers, leaves: newLeaves, notes: newNotes, shifts: newShifts });
   };
 
   const handleAddEmployeeLeave = (empName, dateStr) => {
@@ -2469,7 +2517,7 @@ export default function App() {
     }
   };
 
-  const handleSaveLeaves = (userName, leavesArray) => {
+  const handleSaveLeaves = (userName, leavesArray, noteStr) => {
     let newLeavesMap = { ...employeeLeaves, [userName]: leavesArray };
 
     const dateCounts = {};
@@ -2492,7 +2540,14 @@ export default function App() {
     });
 
     setEmployeeLeaves(newLeavesMap);
-    syncStateToCloud(firebaseUser, { leaves: newLeavesMap });
+    
+    let newNotesMap = { ...employeeNotes };
+    if (noteStr !== undefined) {
+      newNotesMap[userName] = noteStr;
+      setEmployeeNotes(newNotesMap);
+    }
+    
+    syncStateToCloud(firebaseUser, { leaves: newLeavesMap, notes: newNotesMap });
   };
 
   const handleAddManualShift = (dateStr, shiftCategory, userName) => {
@@ -2684,9 +2739,9 @@ export default function App() {
 
       {activeScreen === 'schedule_editor' && <ScheduleEditorScreen shifts={shifts} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} timeBlockDemands={timeBlockDemands} onAddShift={handleAddManualShift} onRemoveShift={handleRemoveManualShift} onAutoSchedule={handleAutoSchedule} onBack={handleBack} ruleEnabled={ruleEnabled} leaveSettings={leaveSettings} announcement={announcement} onNavigate={navigateTo} />}
       
-      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
+      {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} employeeNotes={employeeNotes} leaveSettings={leaveSettings} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
       
-      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
+      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} employeeNotes={employeeNotes} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
       
       {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftTimes={shiftTimes} onUpdateShiftTimes={handleUpdateShiftTimes} timeBlockDemands={timeBlockDemands} onUpdateTimeBlockDemands={handleUpdateTimeBlockDemands} businessHours={businessHours} onUpdateBusinessHours={handleUpdateBusinessHours} />}
       
