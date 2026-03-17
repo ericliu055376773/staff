@@ -362,6 +362,13 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
   const maxTotalLeaves = leaveSettings?.total || 8;
   const defaultYear = leaveSettings?.year || 2026;
 
+  let parsedNote = null;
+  try {
+    if (userNote) parsedNote = JSON.parse(userNote);
+  } catch (e) {
+    parsedNote = { reason: userNote };
+  }
+
   const handleBlur = () => {
     if (!/^\d{6}$/.test(localPassword)) {
       setPwdError('需為6位數字');
@@ -480,12 +487,13 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
           )}
         </div>
         
-        {/* 新增：員工備註顯示卡片 */}
-        {userNote && (
+        {/* 升級：請假紀錄顯示卡片 */}
+        {parsedNote && (parsedNote.date || parsedNote.reason) && (
           <div className="mt-1 pt-3 border-t border-gray-200 border-dashed">
-            <span className="text-[10px] font-bold text-gray-400 flex items-center gap-1.5 mb-2"><AlignLeft size={12}/> 員工備註</span>
-            <div className="bg-white p-3 rounded-xl border border-gray-100 text-xs text-gray-700 font-bold leading-relaxed shadow-sm">
-              {userNote}
+            <span className="text-[10px] font-bold text-gray-400 flex items-center gap-1.5 mb-2"><AlignLeft size={12}/> 請假紀錄</span>
+            <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col gap-2 shadow-sm">
+              {parsedNote.date && <div className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-md self-start border border-blue-100">{parsedNote.date}</div>}
+              {parsedNote.reason && <div className="text-xs text-gray-700 font-bold leading-relaxed">{parsedNote.reason}</div>}
             </div>
           </div>
         )}
@@ -1397,10 +1405,24 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
 
 function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes, leaveSettings, onSaveLeaves, announcement, onLogout }) {
   const initialLeaves = employeeLeaves[currentUser] || [];
-  const initialNote = employeeNotes[currentUser] || '';
+  
+  // 嘗試解析現有的請假紀錄 JSON (如果有)
+  let initialDate = '';
+  let initialReason = '';
+  try {
+    if (employeeNotes[currentUser]) {
+       const parsed = JSON.parse(employeeNotes[currentUser]);
+       initialDate = parsed.date || '';
+       initialReason = parsed.reason || '';
+    }
+  } catch (e) {
+     initialReason = employeeNotes[currentUser] || ''; // 相容舊版純文字備註
+  }
   
   const [selectedLeaves, setSelectedLeaves] = useState(initialLeaves);
-  const [localNote, setLocalNote] = useState(initialNote);
+  const [leaveDate, setLeaveDate] = useState(initialDate);
+  const [leaveReason, setLeaveReason] = useState(initialReason);
+  
   const [isSubmitted, setIsSubmitted] = useState(false); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [warningMsg, setWarningMsg] = useState('');
@@ -1487,9 +1509,14 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
     }
   };
 
+  // 防呆檢查：如果有填寫日期或原因，則兩者皆為必填
+  const isNoteValid = (!leaveDate && !leaveReason.trim()) || (leaveDate && leaveReason.trim());
+  const canSubmitBtn = (selectedLeaves.length > 0 || (leaveDate && leaveReason.trim())) && isNoteValid;
+
   const confirmSubmit = () => {
     setIsSubmitted(true);
-    onSaveLeaves(currentUser, selectedLeaves, localNote);
+    const noteData = (leaveDate && leaveReason.trim()) ? JSON.stringify({ date: leaveDate, reason: leaveReason.trim() }) : '';
+    onSaveLeaves(currentUser, selectedLeaves, noteData);
     setShowConfirmModal(false);
   };
 
@@ -1525,7 +1552,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
              <AlertCircle size={20} className="shrink-0 mt-0.5" />
              <div>
                <h4 className="font-bold text-sm">排休系統已關閉</h4>
-               <p className="text-xs font-medium mt-1 leading-relaxed">目前已超過本月排休截止日（{lockDate}號），無法再進行任何排休異動。如需修改假單，請直接聯繫主管處理。</p>
+               <p className="text-xs font-medium mt-1 leading-relaxed">目前已超過本月排休截止日（{lockDate}號），無法再進行任何排休或請假異動。如需修改假單，請直接聯繫主管處理。</p>
              </div>
           </div>
         )}
@@ -1596,7 +1623,6 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
                 <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted || isLocked} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${lockedStyle}`}>
                   <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700')) : ''}`}>{day}</span>
                   
-                  {/* 升級：右上角小字標記 */}
                   {info.displayLabel && (
                     <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${myLeave ? 'text-white/90' : (isFull ? 'text-red-500' : 'text-blue-600')}`}>
                       {info.displayLabel}
@@ -1608,20 +1634,38 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
           </div>
         </div>
 
-        {/* 新增：員工排休備註卡片 */}
+        {/* 升級：請假申請卡片 (日期與原因必填) */}
         <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 mb-8">
-           <div className="flex items-center gap-2 mb-3 ml-1">
+           <div className="flex items-center gap-2 mb-4 ml-1 border-b border-gray-50 pb-3">
              <AlignLeft size={16} className="text-blue-500" />
-             <h3 className="text-sm font-bold text-[#111]">排休備註 <span className="text-gray-400 text-xs font-medium ml-1">(選填)</span></h3>
+             <h3 className="text-sm font-bold text-[#111]">特殊請假申請 <span className="text-gray-400 text-[10px] font-medium ml-1">(若不請假則免填)</span></h3>
            </div>
-           <textarea
-             value={localNote}
-             onChange={e => setLocalNote(e.target.value)}
-             disabled={isSubmitted || isLocked}
-             placeholder={isLocked ? "系統已鎖定，無法新增或修改備註" : "請輸入您的排休備註或特殊需求..."}
-             className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-sm font-bold text-gray-700 outline-none focus:border-blue-500 focus:bg-white transition-all resize-none shadow-sm disabled:opacity-60 disabled:bg-gray-100"
-             rows={3}
-           />
+           <div className="space-y-3">
+             <div>
+               <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">選擇日期 <span className="text-red-500">*</span></label>
+               <input 
+                 type="date" 
+                 value={leaveDate}
+                 onChange={e => setLeaveDate(e.target.value)}
+                 disabled={isSubmitted || isLocked}
+                 className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-gray-700 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-sm disabled:opacity-60 disabled:bg-gray-100"
+               />
+             </div>
+             <div>
+               <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">填寫原因 <span className="text-red-500">*</span></label>
+               <textarea
+                 value={leaveReason}
+                 onChange={e => setLeaveReason(e.target.value)}
+                 disabled={isSubmitted || isLocked}
+                 placeholder={isLocked ? "系統已鎖定，無法新增或修改" : "請輸入您的請假原因..."}
+                 className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-gray-700 outline-none focus:border-blue-500 focus:bg-white transition-all resize-none shadow-sm disabled:opacity-60 disabled:bg-gray-100"
+                 rows={2}
+               />
+             </div>
+           </div>
+           {!isNoteValid && (
+              <p className="text-[10px] font-bold text-red-500 mt-3 flex items-center gap-1 animate-pulse"><AlertCircle size={12}/> 請完整填寫請假日期與原因，否則無法送出！</p>
+           )}
         </div>
 
         <div className="w-full">
@@ -1635,9 +1679,16 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
             </div>
           ) : (
             <button
-              onClick={() => { if (selectedLeaves.length > 0 || localNote) setShowConfirmModal(true); }}
+              onClick={() => { 
+                if (!isNoteValid) {
+                   setWarningMsg('請完整填寫請假日期與原因');
+                   setTimeout(() => setWarningMsg(''), 3000);
+                   return;
+                }
+                if (selectedLeaves.length > 0 || (leaveDate && leaveReason.trim())) setShowConfirmModal(true); 
+              }}
               className={`w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-lg transition-all active:scale-[0.98] ${
-                selectedLeaves.length > 0 || localNote ? 'bg-[#2563EB] text-white shadow-blue-600/30 hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
+                canSubmitBtn ? 'bg-[#2563EB] text-white shadow-blue-600/30 hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
               }`}
             >
               發送假單 ({monthLeavesCount} / {MAX_LEAVES} 天)
@@ -1652,10 +1703,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowConfirmModal(false)}></div>
           <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm relative z-10 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-4"><AlertCircle size={24} /></div>
-            <h3 className="text-xl font-bold text-[#111] mb-2">確定送出排休假單？</h3>
+            <h3 className="text-xl font-bold text-[#111] mb-2">確定送出排休與請假？</h3>
             <p className="text-sm text-gray-500 mb-6 leading-relaxed">
               您本月已自選 <strong className="text-gray-800">{monthLeavesCount}</strong> 天假。
-              {selectedLeaves.some(l => l.status === 'pending') && <span className="text-orange-500 font-bold block mt-1"> 包含待審核的假單，須經主管同意。</span>}
+              {leaveDate && leaveReason && <span className="text-blue-600 font-bold block mt-1">✓ 包含 1 筆特殊請假申請。</span>}
+              {selectedLeaves.some(l => l.status === 'pending') && <span className="text-orange-500 font-bold block mt-1">⚠ 包含待審核的假單，須經主管同意。</span>}
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3.5 rounded-2xl bg-gray-50 text-gray-600 font-bold hover:bg-gray-100 transition-colors">取消</button>
