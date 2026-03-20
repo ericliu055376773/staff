@@ -293,7 +293,7 @@ function BottomNav({ role, activeScreen, onNavigate, pendingCount }) {
   );
 }
 
-function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote, onUpdate, onRequestDelete, onAddLeave, onRemoveLeave }) {
+function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote, userShifts, isScheduleGenerated, onUpdate, onRequestDelete, onAddLeave, onRemoveLeave }) {
   const [localName, setLocalName] = useState(user.name);
   const [localShift, setLocalShift] = useState(user.role ? user.role.substring(0, 2) : '早班');
   const [localPosition, setLocalPosition] = useState(user.role ? user.role.substring(2) : '正職');
@@ -307,6 +307,22 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
   const localRole = `${localShift}${localPosition}`;
   const maxTotalLeaves = leaveSettings?.total || 8;
   const defaultYear = leaveSettings?.year || 2026;
+  const defaultMonth = leaveSettings?.month || 3;
+
+  // 動態計算該月份系統自動排的假 (前提是該月份已經執行過一鍵排班)
+  const systemLeaves = [];
+  if (isScheduleGenerated) {
+    const daysInMonth = new Date(defaultYear, defaultMonth, 0).getDate();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${defaultYear}/${defaultMonth}/${d}`;
+      const hasManual = userLeaves.some(l => l.date === dateStr);
+      const hasShift = userShifts && userShifts.some(s => s.date === dateStr);
+      // 若這天他沒有手動排休，且也沒有被排到班，就視為系統幫他排的休假
+      if (!hasManual && !hasShift) {
+        systemLeaves.push(dateStr);
+      }
+    }
+  }
 
   let parsedNote = null;
   try {
@@ -404,7 +420,7 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
       <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3 border border-gray-100 relative z-10">
         <div className="flex items-center justify-between ml-1">
           <span className="text-xs font-bold text-gray-500 flex items-center gap-1.5">
-            <CalendarIcon size={12} /> 排休狀況 ({userLeaves.length}/{maxTotalLeaves})
+            <CalendarIcon size={12} /> 排休狀況 ({userLeaves.length + systemLeaves.length}/{maxTotalLeaves})
           </span>
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-gray-400 font-bold">補假</span>
@@ -414,22 +430,44 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
             <button onClick={() => { if(newLeaveMonth && newLeaveDay) { onAddLeave(user.name, `${defaultYear}/${newLeaveMonth}/${newLeaveDay}`); setNewLeaveMonth(''); setNewLeaveDay(''); } }} className="bg-[#111] text-white rounded p-0.5 shadow-sm active:scale-90 transition-transform"><Plus size={12}/></button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {userLeaves.length > 0 ? (
-            userLeaves.map((l) => {
-              const [y, m, d] = l.date.split('/');
-              const displayDate = `${m}/${d}`;
-              return (
-                <span key={l.date} className={`relative group flex items-center gap-1 text-[10px] pl-2 pr-1.5 py-1 rounded-md font-bold shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-600 border border-green-200'}`}>
-                  {displayDate} {l.status === 'pending' ? '(待核)' : ''}
-                  <button onClick={() => setLeaveToDelete(l.date)} className="bg-white/50 hover:bg-red-500 hover:text-white text-gray-400 rounded-full p-0.5 transition-colors" title="移除此假單">
-                    <X size={10} strokeWidth={3} />
-                  </button>
-                </span>
-              );
-            })
-          ) : (
-            <span className="text-[10px] text-gray-400 font-medium px-1">尚未排假</span>
+        
+        <div className="flex flex-col gap-2 mt-1">
+          <div className="text-[10px] font-bold text-gray-500 mb-0.5">👤 自己排休 ({userLeaves.length})</div>
+          <div className="flex flex-wrap gap-2">
+            {userLeaves.length > 0 ? (
+              userLeaves.map((l) => {
+                const [y, m, d] = l.date.split('/');
+                const displayDate = `${m}/${d}`;
+                return (
+                  <span key={l.date} className={`relative group flex items-center gap-1 text-[10px] pl-2 pr-1.5 py-1 rounded-md font-bold shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-600 border border-green-200'}`}>
+                    {displayDate} {l.status === 'pending' ? '(待核)' : ''}
+                    <button onClick={() => setLeaveToDelete(l.date)} className="bg-white/50 hover:bg-red-500 hover:text-white text-gray-400 rounded-full p-0.5 transition-colors" title="移除此假單">
+                      <X size={10} strokeWidth={3} />
+                    </button>
+                  </span>
+                );
+              })
+            ) : (
+              <span className="text-[10px] text-gray-400 font-medium px-1">尚未手動排假</span>
+            )}
+          </div>
+          
+          {systemLeaves.length > 0 && (
+            <>
+              <div className="text-[10px] font-bold text-gray-500 mt-2 border-t border-gray-200/80 pt-3 mb-0.5 flex items-center gap-1">
+                <Wand2 size={12} className="text-purple-500" /> 系統自動排休 ({systemLeaves.length})
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {systemLeaves.map(dateStr => {
+                   const [y, m, d] = dateStr.split('/');
+                   return (
+                     <span key={`sys_${dateStr}`} className="bg-gray-200/70 text-gray-600 border border-gray-300 text-[10px] px-2 py-1 rounded-md font-bold shadow-sm">
+                       {m}/{d} (系統)
+                     </span>
+                   )
+                })}
+              </div>
+            </>
           )}
         </div>
         
@@ -1280,7 +1318,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   );
 }
 
-function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, employeeNotes, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave }) {
+function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, leaveSettings, employeeNotes, onUpdateEmployee, onDeleteEmployee, onAddLeave, onRemoveLeave, shifts }) {
   const [filterShift, setFilterShift] = useState('全部');
   const [filterPosition, setFilterPosition] = useState('全部');
   const [userToDelete, setUserToDelete] = useState(null); // 全螢幕防呆 Modal 狀態
@@ -1376,15 +1414,24 @@ function EmployeeManagementScreen({ onBack, registeredUsers, employeeLeaves, lea
 
       <div className="px-8 mt-4 space-y-4">
         {filteredUsers.length > 0 ? (
-          filteredUsers.map((user) => (
-            <EmployeeEditCard 
-              key={user.id} user={user} allUsers={registeredUsers} 
-              userLeaves={employeeLeaves[user.name] || []} leaveSettings={leaveSettings}
-              userNote={employeeNotes[user.name] || ''}
-              onUpdate={onUpdateEmployee} onRequestDelete={setUserToDelete} 
-              onAddLeave={onAddLeave} onRemoveLeave={onRemoveLeave}
-            />
-          ))
+          filteredUsers.map((user) => {
+            const defaultYear = leaveSettings?.year || 2026;
+            const defaultMonth = leaveSettings?.month || 3;
+            // 判斷系統是否有為這個月產生過班表
+            const isScheduleGenerated = shifts.some(s => s.date.startsWith(`${defaultYear}/${defaultMonth}/`));
+
+            return (
+              <EmployeeEditCard 
+                key={user.id} user={user} allUsers={registeredUsers} 
+                userLeaves={employeeLeaves[user.name] || []} leaveSettings={leaveSettings}
+                userNote={employeeNotes[user.name] || ''}
+                userShifts={shifts.filter(s => s.assignee === user.name)}
+                isScheduleGenerated={isScheduleGenerated}
+                onUpdate={onUpdateEmployee} onRequestDelete={setUserToDelete} 
+                onAddLeave={onAddLeave} onRemoveLeave={onRemoveLeave}
+              />
+            );
+          })
         ) : (
           <div className="text-center py-10 bg-white rounded-[1.5rem] border border-dashed border-gray-200">
             <Search size={32} className="mx-auto text-gray-300 mb-2" />
@@ -2777,39 +2824,50 @@ export default function App() {
          return Math.random() - 0.5; // 隨機打散，確保公平
       });
 
-      // 4. 區分早晚班候選池
-      let mornPool = availableEmployees.filter(emp => employeeStats[emp].isMorning);
-      let nightPool = availableEmployees.filter(emp => employeeStats[emp].isNight);
-
       let assignedToday = [];
+      let mornCoverage = 0;
+      let nightCoverage = 0;
 
-      // 5. 安排早班 (達到需求上限即刻停止)
-      for (let emp of mornPool) {
-        if (assignedToday.filter(s => s.shiftCategory === '早班').length >= mornDemand) break;
+      // 4. 派班給今天能上班的員工，並動態累加時段涵蓋人數
+      for (let emp of availableEmployees) {
+        if (mornCoverage >= mornDemand && nightCoverage >= nightDemand) break; // 早晚班都滿了，結束今天排班
+
         const u = employeeStats[emp].roleObj;
-        const shiftCat = '早班';
+        const shiftCat = u.role.includes('晚班') ? '晚班' : '早班';
         const exactTime = getRoleDefaultTime(u.role, info.isOffDay, shiftCat, shiftCodes, rolesConfig);
-        assignedToday.push({
-          id: `auto_${u.id}_${dateStr}_${Math.random().toString(36).substring(2,7)}`,
-          date: dateStr, day: dayStr, type: u.role, shiftCategory: shiftCat,
-          time: exactTime, assignee: u.name, status: 'confirmed'
-        });
+
+        let providesMorn = false;
+        let providesNight = false;
+        
+        // 掃描這個人的班表，看他是否有涵蓋到早/晚班的時段
+        for (let h = 11; h <= 15; h++) { if (isHourInTimeStr(h, exactTime)) providesMorn = true; }
+        for (let h = 17; h <= 22; h++) { if (isHourInTimeStr(h, exactTime)) providesNight = true; }
+
+        let shouldAssign = false;
+
+        // 若他能上早班，且早班還缺人
+        if (providesMorn && mornCoverage < mornDemand) {
+           shouldAssign = true;
+        }
+        // 若他能上晚班，且晚班還缺人
+        if (providesNight && nightCoverage < nightDemand) {
+           shouldAssign = true;
+        }
+
+        if (shouldAssign) {
+           // 【關鍵修正】如果他的班別(如A班)跨越早晚，就同時計入早晚的人數額度中！
+           if (providesMorn) mornCoverage++;
+           if (providesNight) nightCoverage++;
+
+           assignedToday.push({
+             id: `auto_${u.id}_${dateStr}_${Math.random().toString(36).substring(2,7)}`,
+             date: dateStr, day: dayStr, type: u.role, shiftCategory: shiftCat,
+             time: exactTime, assignee: u.name, status: 'confirmed'
+           });
+        }
       }
 
-      // 6. 安排晚班 (達到需求上限即刻停止)
-      for (let emp of nightPool) {
-        if (assignedToday.filter(s => s.shiftCategory === '晚班').length >= nightDemand) break;
-        const u = employeeStats[emp].roleObj;
-        const shiftCat = '晚班';
-        const exactTime = getRoleDefaultTime(u.role, info.isOffDay, shiftCat, shiftCodes, rolesConfig);
-        assignedToday.push({
-          id: `auto_${u.id}_${dateStr}_${Math.random().toString(36).substring(2,7)}`,
-          date: dateStr, day: dayStr, type: u.role, shiftCategory: shiftCat,
-          time: exactTime, assignee: u.name, status: 'confirmed'
-        });
-      }
-
-      // 7. 結算今日狀態，更新追蹤器
+      // 5. 結算今日狀態，更新追蹤器
       Object.keys(employeeStats).forEach(emp => {
         const isWorkingToday = assignedToday.some(s => s.assignee === emp);
         if (isWorkingToday) {
@@ -2910,7 +2968,7 @@ export default function App() {
       
       {activeScreen === 'leave_request' && <LeaveRequestScreen onBack={handleBack} currentUser={currentUser} employeeLeaves={employeeLeaves} employeeNotes={employeeNotes} leaveSettings={leaveSettings} onSaveLeaves={handleSaveLeaves} announcement={announcement} onLogout={handleLogout} />}
       
-      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} employeeNotes={employeeNotes} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} />}
+      {activeScreen === 'employee_management' && <EmployeeManagementScreen onBack={handleBack} registeredUsers={registeredUsers} employeeLeaves={employeeLeaves} employeeNotes={employeeNotes} leaveSettings={leaveSettings} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddLeave={handleAddEmployeeLeave} onRemoveLeave={handleRemoveEmployeeLeave} shifts={shifts} />}
       
       {activeScreen === 'backend_settings' && <BackendSettingsScreen onBack={handleBack} ruleEnabled={ruleEnabled} setRuleEnabled={setRuleEnabled} leaveSettings={leaveSettings} onUpdateLeaveSettings={handleUpdateLeaveSettings} announcement={announcement} onUpdateAnnouncement={handleUpdateAnnouncement} shiftCodes={shiftCodes} onUpdateShiftCodes={handleUpdateShiftCodes} rolesConfig={rolesConfig} onUpdateRolesConfig={handleUpdateRolesConfig} timeBlockDemands={timeBlockDemands} onUpdateTimeBlockDemands={handleUpdateTimeBlockDemands} businessHours={businessHours} onUpdateBusinessHours={handleUpdateBusinessHours} />}
       
