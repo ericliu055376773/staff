@@ -2713,16 +2713,26 @@ export default function App() {
     const targetY = leaveSettings?.year || 2026;
     const targetM = leaveSettings?.month || 3;
     const daysInMonth = new Date(targetY, targetM, 0).getDate();
+    
+    // 精準扣假參數：計算每個人這個月「總共需要上幾天班」
+    const targetLeaves = leaveSettings?.total || 8;
+    const targetWorkDays = daysInMonth - targetLeaves;
 
     let draftShifts = [];
     const manualLeaves = employeeLeaves || {};
 
-    // 追蹤器：確保排班平均與七休二防呆
-    let monthlyShiftsCount = {};
-    let consecutiveWorkDays = {};
+    // 追蹤器：確保排班平均、七休二防呆、精準計算剩餘上班日
+    let employeeStats = {};
     registeredUsers.forEach(u => {
-      monthlyShiftsCount[u.name] = 0;
-      consecutiveWorkDays[u.name] = 0;
+      employeeStats[u.name] = {
+        roleObj: u,
+        manualLeaves: (manualLeaves[u.name] || []).filter(l => l.date.startsWith(`${targetY}/${targetM}`)).map(l => parseInt(l.date.split('/')[2])),
+        workDaysAssigned: 0,
+        consecutiveWorkDays: 0,
+        score: rolesConfig.find(r => r.name === u.role)?.score || 1,
+        isNight: u.role.includes('晚班'),
+        isMorning: !u.role.includes('晚班')
+      };
     });
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -2731,7 +2741,7 @@ export default function App() {
       const dayOfWeek = new Date(targetY, targetM - 1, day).getDay();
       const dayStr = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][dayOfWeek];
 
-      // 1. 取得今日各時段的最大需求人數 (依據後台的時段人數需求規則)
+      // 1. 第一重要：取得今日各時段的最大需求人數 (絕對不可超過此人數)
       let mornDemand = 0;
       let nightDemand = 0;
       timeBlockDemands.forEach(d => {
@@ -2743,40 +2753,40 @@ export default function App() {
          else { nightDemand = Math.max(nightDemand, req); }
       });
 
-      // 2. 過濾今日可排班的員工 (未請假)
-      let availableUsers = registeredUsers.filter(u => {
-        const leaves = manualLeaves[u.name] || [];
-        return !leaves.some(l => l.date === dateStr);
+      // 2. 篩選今日可排班候選人 (未手動請假 且 遵守七休二 且 未達應上班天數上限)
+      let availableEmployees = Object.keys(employeeStats).filter(empName => {
+        const stats = employeeStats[empName];
+        // 如果已經達到當月應上班總天數，則不再排班，自然形成系統排休
+        if (stats.workDaysAssigned >= targetWorkDays) return false;
+        // 員工當日有手動請假
+        if (stats.manualLeaves.includes(day)) return false;
+        // 第二重要：七休二防呆 (若連續上班達 5 天，強制今日休息)
+        if (ruleEnabled && stats.consecutiveWorkDays >= 5) return false;
+        return true;
       });
 
-      // 3. 檢查七休二防呆 (若連續上班達 5 天，強制今日轉休假不排班)
-      if (ruleEnabled) {
-         availableUsers = availableUsers.filter(u => consecutiveWorkDays[u.name] < 5);
-      }
-
-      // 4. 將可排班員工排序：優先派給「當月班數較少者」，若班數相同則「戰力高者(如店長/組長)」優先排入
-      availableUsers.sort((a, b) => {
-         let shiftsA = monthlyShiftsCount[a.name];
-         let shiftsB = monthlyShiftsCount[b.name];
-         if (shiftsA !== shiftsB) return shiftsA - shiftsB; // 班少者優先
-
-         let scoreA = rolesConfig.find(r => r.name === a.role)?.score || 1;
-         let scoreB = rolesConfig.find(r => r.name === b.role)?.score || 1;
-         if (scoreA !== scoreB) return scoreB - scoreA; // 戰力高者優先保底
-
-         return Math.random() - 0.5; // 隨機打散，避免同分數者永遠同順序
+      // 3. 排序搶班順序：優先保障「還缺班數的人」，若班數一樣則「戰力高(店長等)」優先保底
+      availableEmployees.sort((a, b) => {
+         const statsA = employeeStats[a];
+         const statsB = employeeStats[b];
+         const needsA = targetWorkDays - statsA.workDaysAssigned;
+         const needsB = targetWorkDays - statsB.workDaysAssigned;
+         
+         if (needsA !== needsB) return needsB - needsA; // 缺班數越多越優先
+         if (statsA.score !== statsB.score) return statsB.score - statsA.score; // 戰力高者優先
+         return Math.random() - 0.5; // 隨機打散，確保公平
       });
 
-      // 5. 區分早晚班候選池 (依據職位名稱判斷)
-      let mornPool = availableUsers.filter(u => !u.role.includes('晚班'));
-      let nightPool = availableUsers.filter(u => u.role.includes('晚班'));
+      // 4. 區分早晚班候選池
+      let mornPool = availableEmployees.filter(emp => employeeStats[emp].isMorning);
+      let nightPool = availableEmployees.filter(emp => employeeStats[emp].isNight);
 
       let assignedToday = [];
 
-      // 6. 安排早班 (達到需求上限即停止)
-      for (let u of mornPool) {
+      // 5. 安排早班 (達到需求上限即刻停止)
+      for (let emp of mornPool) {
         if (assignedToday.filter(s => s.shiftCategory === '早班').length >= mornDemand) break;
-        
+        const u = employeeStats[emp].roleObj;
         const shiftCat = '早班';
         const exactTime = getRoleDefaultTime(u.role, info.isOffDay, shiftCat, shiftCodes, rolesConfig);
         assignedToday.push({
@@ -2786,10 +2796,10 @@ export default function App() {
         });
       }
 
-      // 7. 安排晚班 (達到需求上限即停止)
-      for (let u of nightPool) {
+      // 6. 安排晚班 (達到需求上限即刻停止)
+      for (let emp of nightPool) {
         if (assignedToday.filter(s => s.shiftCategory === '晚班').length >= nightDemand) break;
-
+        const u = employeeStats[emp].roleObj;
         const shiftCat = '晚班';
         const exactTime = getRoleDefaultTime(u.role, info.isOffDay, shiftCat, shiftCodes, rolesConfig);
         assignedToday.push({
@@ -2799,14 +2809,15 @@ export default function App() {
         });
       }
 
-      // 8. 更新當月排班計數器與連續上班天數
-      registeredUsers.forEach(u => {
-        const isWorkingToday = assignedToday.some(s => s.assignee === u.name);
+      // 7. 結算今日狀態，更新追蹤器
+      Object.keys(employeeStats).forEach(emp => {
+        const isWorkingToday = assignedToday.some(s => s.assignee === emp);
         if (isWorkingToday) {
-          monthlyShiftsCount[u.name]++;
-          consecutiveWorkDays[u.name]++;
+          employeeStats[emp].workDaysAssigned++;
+          employeeStats[emp].consecutiveWorkDays++;
         } else {
-          consecutiveWorkDays[u.name] = 0; // 只要這天沒排到班 (不管是因為滿了還是請假)，連續天數就歸零
+          // 只要今天沒上班 (手動請假或系統因為滿額/七休二未排班)，連續天數歸零
+          employeeStats[emp].consecutiveWorkDays = 0; 
         }
       });
 
