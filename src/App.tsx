@@ -174,28 +174,44 @@ const initialShiftCodes = [
   { id: 'sc_B', name: 'B班', time: '12:00 - 21:00', isSystem: false },
 ];
 
-// 職位戰力與預設班別設定
+// 職位戰力與預設班別設定 (加入班別2的支援)
 const initialRolesConfig = [
-  { id: 'rc_f_morn', name: '早班正職', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', score: 3, isSystem: true },
-  { id: 'rc_f_night', name: '晚班正職', weekdayShift: 'sc_night', weekendShift: 'sc_night', score: 3, isSystem: true },
-  { id: 'rc_p_morn', name: '早班兼職', weekdayShift: 'sc_p_morn_wd', weekendShift: 'sc_morn', score: 1, isSystem: true },
-  { id: 'rc_p_night', name: '晚班兼職', weekdayShift: 'sc_p_night_wd', weekendShift: 'sc_night', score: 1, isSystem: true },
-  { id: 'rc_mgr_m', name: '早班店長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', score: 10, isSystem: true },
-  { id: 'rc_mgr_n', name: '晚班店長', weekdayShift: 'sc_night', weekendShift: 'sc_night', score: 10, isSystem: true },
-  { id: 'rc_vmgr_m', name: '早班副店長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', score: 8, isSystem: true },
-  { id: 'rc_vmgr_n', name: '晚班副店長', weekdayShift: 'sc_night', weekendShift: 'sc_night', score: 8, isSystem: true },
-  { id: 'rc_ldr_m', name: '早班組長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', score: 5, isSystem: true },
-  { id: 'rc_ldr_n', name: '晚班組長', weekdayShift: 'sc_night', weekendShift: 'sc_night', score: 5, isSystem: true },
-  { id: 'rc_res_m', name: '早班儲備幹部', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', score: 4, isSystem: true },
-  { id: 'rc_res_n', name: '晚班儲備幹部', weekdayShift: 'sc_night', weekendShift: 'sc_night', score: 4, isSystem: true },
+  { id: 'rc_f_morn', name: '早班正職', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 3, isSystem: true },
+  { id: 'rc_f_night', name: '晚班正職', weekdayShift: 'sc_night', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 3, isSystem: true },
+  { id: 'rc_p_morn', name: '早班兼職', weekdayShift: 'sc_p_morn_wd', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 1, isSystem: true },
+  { id: 'rc_p_night', name: '晚班兼職', weekdayShift: 'sc_p_night_wd', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 1, isSystem: true },
+  { id: 'rc_mgr_m', name: '早班店長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 10, isSystem: true },
+  { id: 'rc_mgr_n', name: '晚班店長', weekdayShift: 'sc_night', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 10, isSystem: true },
+  { id: 'rc_vmgr_m', name: '早班副店長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 8, isSystem: true },
+  { id: 'rc_vmgr_n', name: '晚班副店長', weekdayShift: 'sc_night', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 8, isSystem: true },
+  { id: 'rc_ldr_m', name: '早班組長', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 5, isSystem: true },
+  { id: 'rc_ldr_n', name: '晚班組長', weekdayShift: 'sc_night', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 5, isSystem: true },
+  { id: 'rc_res_m', name: '早班儲備幹部', weekdayShift: 'sc_morn', weekendShift: 'sc_morn', weekdayShift2: '', weekendShift2: '', score: 4, isSystem: true },
+  { id: 'rc_res_n', name: '晚班儲備幹部', weekdayShift: 'sc_night', weekendShift: 'sc_night', weekdayShift2: '', weekendShift2: '', score: 4, isSystem: true },
 ];
 
 const getRoleDefaultTime = (roleName, isWeekend, shiftCategory, shiftCodes, rolesConfig) => {
   const roleObj = rolesConfig.find(r => r.name === roleName);
   if (roleObj) {
-    const targetShiftId = isWeekend ? roleObj.weekendShift : roleObj.weekdayShift;
-    const shiftObj = shiftCodes.find(sc => sc.id === targetShiftId);
-    if (shiftObj) return shiftObj.time;
+    const targetShiftId1 = isWeekend ? roleObj.weekendShift : roleObj.weekdayShift;
+    const targetShiftId2 = isWeekend ? roleObj.weekendShift2 : roleObj.weekdayShift2;
+
+    const shiftObj1 = shiftCodes.find(sc => sc.id === targetShiftId1);
+    const shiftObj2 = shiftCodes.find(sc => sc.id === targetShiftId2);
+
+    // 如果該職位設定了兩個班別，AI 根據需要的是早班或晚班來做智慧決策
+    if (shiftObj1 && shiftObj2) {
+       const start1 = parseInt(shiftObj1.time.split('-')[0].trim().split(':')[0]) || 0;
+       const start2 = parseInt(shiftObj2.time.split('-')[0].trim().split(':')[0]) || 0;
+
+       if (shiftCategory === '早班') {
+          return start1 <= start2 ? shiftObj1.time : shiftObj2.time;
+       } else if (shiftCategory === '晚班') {
+          return start1 >= start2 ? shiftObj1.time : shiftObj2.time;
+       }
+    }
+    
+    if (shiftObj1) return shiftObj1.time;
   }
   
   // 找不到職位對應時的備用邏輯
@@ -217,68 +233,6 @@ const isDayUnderstaffed = (dateStr, isWeekend, shifts, demands) => {
     if (coverage < demand) return true;
   }
   return false;
-};
-
-const generateFullScheduleForUser = (user, leavesArray, ruleEnabled, totalLeaveDays, targetYear, targetMonth, shiftCodes, rolesConfig) => {
-  if (!user.role) return [];
-  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
-  const isLeave = Array(daysInMonth).fill(false);
-  
-  leavesArray.forEach((l) => {
-    const [y, m, d] = l.date.split('/').map(Number);
-    if (y === targetYear && m === targetMonth) {
-      isLeave[d - 1] = true;
-    }
-  });
-
-  let extraLeaves = totalLeaveDays - isLeave.filter(Boolean).length;
-
-  for (let i = 0; i < daysInMonth; i++) {
-    if (!isLeave[i] && ruleEnabled) {
-      let windowStart = Math.max(0, i - 6);
-      let workDaysInWindow = 0;
-      for (let j = windowStart; j <= i; j++) {
-        if (!isLeave[j]) workDaysInWindow++;
-      }
-      if (workDaysInWindow > 5) {
-        isLeave[i] = true;
-        extraLeaves--;
-      }
-    }
-  }
-
-  for (let i = daysInMonth - 1; i >= 0 && extraLeaves > 0; i--) {
-    if (!isLeave[i]) {
-      isLeave[i] = true;
-      extraLeaves--;
-    }
-  }
-
-  const newShifts = [];
-  for (let i = 0; i < daysInMonth; i++) {
-    if (!isLeave[i]) {
-      const dayNum = i + 1;
-      const dateStr = `${targetYear}/${targetMonth}/${dayNum}`;
-      const dayOfWeek = new Date(targetYear, targetMonth - 1, dayNum).getDay();
-      const dayStr = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][dayOfWeek];
-      
-      const info = getDayInfo(targetYear, targetMonth, dayNum);
-      const shiftCat = user.role.includes('晚班') ? '晚班' : '早班';
-      const exactTime = getRoleDefaultTime(user.role, info.isOffDay, shiftCat, shiftCodes, rolesConfig);
-
-      newShifts.push({
-        id: `auto_${user.id}_${dateStr}_${Math.random().toString(36).substring(2,7)}`,
-        date: dateStr,
-        day: dayStr,
-        type: user.role,
-        shiftCategory: shiftCat,
-        time: exactTime,
-        assignee: user.name,
-        status: 'confirmed',
-      });
-    }
-  }
-  return newShifts;
 };
 
 // 系統初始設定
@@ -2190,16 +2144,30 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
                     </div>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 border-t border-gray-100 pt-3">
-                       <div className="flex flex-col gap-1">
-                          <span className="text-[10px] text-gray-500 font-bold ml-1">平日預設班別代號</span>
+                       <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] text-gray-500 font-bold ml-1">平日預設班別 1</span>
                           <select value={rc.weekdayShift} onChange={e => handleUpdateRoleConfig(rc.id, 'weekdayShift', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-2 text-xs font-bold text-gray-700 outline-none focus:border-orange-500 shadow-sm">
                             {localShiftCodes.map(sc => <option key={`wd_${sc.id}`} value={sc.id}>{sc.name}</option>)}
                           </select>
                        </div>
-                       <div className="flex flex-col gap-1">
-                          <span className="text-[10px] text-gray-500 font-bold ml-1">假日預設班別代號</span>
+                       <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] text-gray-500 font-bold ml-1">假日預設班別 1</span>
                           <select value={rc.weekendShift} onChange={e => handleUpdateRoleConfig(rc.id, 'weekendShift', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-2 text-xs font-bold text-gray-700 outline-none focus:border-orange-500 shadow-sm">
                             {localShiftCodes.map(sc => <option key={`we_${sc.id}`} value={sc.id}>{sc.name}</option>)}
+                          </select>
+                       </div>
+                       <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] text-gray-500 font-bold ml-1">平日預設班別 2 (可選)</span>
+                          <select value={rc.weekdayShift2 || ''} onChange={e => handleUpdateRoleConfig(rc.id, 'weekdayShift2', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-2 text-xs font-bold text-gray-700 outline-none focus:border-orange-500 shadow-sm">
+                            <option value="">無</option>
+                            {localShiftCodes.map(sc => <option key={`wd2_${sc.id}`} value={sc.id}>{sc.name}</option>)}
+                          </select>
+                       </div>
+                       <div className="flex flex-col gap-1.5">
+                          <span className="text-[10px] text-gray-500 font-bold ml-1">假日預設班別 2 (可選)</span>
+                          <select value={rc.weekendShift2 || ''} onChange={e => handleUpdateRoleConfig(rc.id, 'weekendShift2', e.target.value)} className="w-full bg-white border border-gray-200 rounded-lg p-2 text-xs font-bold text-gray-700 outline-none focus:border-orange-500 shadow-sm">
+                            <option value="">無</option>
+                            {localShiftCodes.map(sc => <option key={`we2_${sc.id}`} value={sc.id}>{sc.name}</option>)}
                           </select>
                        </div>
                     </div>
