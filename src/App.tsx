@@ -2325,6 +2325,9 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 
   const selectedShift = myShifts.find(s => s.date === selectedDate);
   const selectedLeave = myLeaves.find(l => l.date === selectedDate);
+  
+  // ✅ 新增：抓出被選取日期「所有」的排班人員
+  const allDayShifts = shifts.filter(s => s.date === selectedDate);
 
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar bg-[#f8f9fc] pb-32 animate-in slide-in-from-right-8 duration-300">
@@ -2465,6 +2468,49 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
              </div>
            )}
         </div>
+
+        {/* ✅ 新增：當日出勤名單 (顯示給前台員工看) */}
+        {allDayShifts.length > 0 && (
+          <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between mb-4 border-b border-gray-50 pb-3">
+              <h3 className="text-sm font-bold text-[#111] flex items-center gap-2">
+                <Users size={16} className="text-blue-500" /> 當日出勤名單
+              </h3>
+              <span className="text-[10px] bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg font-bold border border-blue-100">
+                共 {allDayShifts.length} 人出勤
+              </span>
+            </div>
+            
+            <div className="flex flex-col gap-4">
+              {['早班', '晚班', '留守'].map(cat => {
+                const catShifts = allDayShifts.filter(s => {
+                  const sCat = s.shiftCategory || (s.type.includes('晚') ? '晚班' : (s.type.includes('留守') ? '留守' : '早班'));
+                  return sCat === cat;
+                });
+
+                if (catShifts.length === 0) return null;
+
+                return (
+                  <div key={cat} className="flex flex-col gap-2.5">
+                    <span className="text-[11px] font-bold text-gray-500 flex items-center gap-1.5">
+                      <Briefcase size={12} /> {cat}
+                      <div className="h-px bg-gray-100 flex-1 ml-1"></div>
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {catShifts.map(s => (
+                        <div key={s.id} className={`border px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-sm ${getShiftCardStyles(s.type)} ${s.assignee === currentUser ? 'ring-2 ring-blue-400 scale-105 transform' : ''}`}>
+                          <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${getRoleStyles(s.type)}`}></div>
+                          <span className="text-xs font-bold">{s.assignee} {s.assignee === currentUser && '(我)'}</span>
+                          {getUserTypeBadge(s.assignee, registeredUsers)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
