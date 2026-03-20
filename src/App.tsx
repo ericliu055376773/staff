@@ -2135,14 +2135,12 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
           <div className="grid grid-cols-1 gap-2.5">
               {localShiftCodes.map(sc => (
                 <div key={sc.id} className="flex flex-wrap items-center gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-100">
-                    <input type="text" value={sc.name} onChange={e => handleUpdateShiftCode(sc.id, 'name', e.target.value)} disabled={sc.isSystem} className="w-full sm:w-28 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm mb-1 sm:mb-0 disabled:opacity-60" placeholder="班別名稱" />
+                    <input type="text" value={sc.name} onChange={e => handleUpdateShiftCode(sc.id, 'name', e.target.value)} className="w-full sm:w-28 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm mb-1 sm:mb-0" placeholder="班別名稱" />
                     <div className="flex flex-1 gap-2 items-center">
                       <input type="text" value={sc.time} onChange={e => handleUpdateShiftCode(sc.id, 'time', e.target.value)} className="flex-1 bg-white border border-gray-200 rounded-lg p-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm min-w-[100px]" placeholder="時段 (例如 11:00-20:00)" />
-                      {!sc.isSystem && (
-                        <button onClick={() => setDeleteTarget({ type: 'shiftCode', id: sc.id, name: sc.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1 shrink-0" title="刪除此班別">
-                           <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button onClick={() => setDeleteTarget({ type: 'shiftCode', id: sc.id, name: sc.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1 shrink-0" title="刪除此班別">
+                         <Trash2 size={14} />
+                      </button>
                     </div>
                 </div>
               ))}
@@ -2179,17 +2177,15 @@ function BackendSettingsScreen({ onBack, ruleEnabled, setRuleEnabled, leaveSetti
               {localRolesConfig.map(rc => (
                 <div key={rc.id} className="flex flex-col gap-3 bg-orange-50/30 p-4 rounded-2xl border border-orange-100/50 shadow-[0_2px_10px_rgba(0,0,0,0.01)] relative">
                     <div className="flex items-center justify-between gap-2">
-                       <input type="text" value={rc.name} onChange={e => handleUpdateRoleConfig(rc.id, 'name', e.target.value)} disabled={rc.isSystem} className="font-extrabold text-sm bg-white border border-gray-200 rounded-lg p-2 focus:border-orange-500 shadow-sm flex-1 disabled:opacity-70 disabled:bg-gray-50" placeholder="職位名稱 (例如 早班正職)" />
+                       <input type="text" value={rc.name} onChange={e => handleUpdateRoleConfig(rc.id, 'name', e.target.value)} className="font-extrabold text-sm bg-white border border-gray-200 rounded-lg p-2 focus:border-orange-500 shadow-sm flex-1" placeholder="職位名稱 (例如 早班正職)" />
                        <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1.5 bg-orange-100/50 px-2.5 py-1.5 rounded-lg border border-orange-200/50">
                              <span className="text-[10px] font-bold text-orange-600">戰力</span>
                              <input type="number" value={rc.score} onChange={e => handleUpdateRoleConfig(rc.id, 'score', parseInt(e.target.value)||0)} className="w-10 bg-transparent border-b border-orange-300 p-0 text-sm font-black text-center text-orange-800 outline-none focus:border-orange-500" />
                           </div>
-                          {!rc.isSystem && (
-                            <button onClick={() => setDeleteTarget({ type: 'roleConfig', id: rc.id, name: rc.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此職位">
-                               <Trash2 size={16} />
-                            </button>
-                          )}
+                          <button onClick={() => setDeleteTarget({ type: 'roleConfig', id: rc.id, name: rc.name })} className="text-gray-400 hover:text-red-500 transition-colors p-1" title="刪除此職位">
+                             <Trash2 size={16} />
+                          </button>
                        </div>
                     </div>
                     
