@@ -439,8 +439,10 @@ function EmployeeEditCard({ user, allUsers, userLeaves, leaveSettings, userNote,
                 const [y, m, d] = l.date.split('/');
                 const displayDate = `${m}/${d}`;
                 return (
-                  <span key={l.date} className={`relative group flex items-center gap-1 text-[10px] pl-2 pr-1.5 py-1 rounded-md font-bold shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-600 border border-green-200'}`}>
-                    {displayDate} {l.status === 'pending' ? '(待核)' : ''}
+                  <span key={l.date} className={`relative group flex items-center gap-1 text-[10px] pl-2 pr-1.5 py-1 rounded-md font-bold shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${
+                    l.type === 'special' ? 'bg-purple-100 text-purple-700 border-purple-200' : (l.status === 'pending' ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-green-100 text-green-600 border-green-200')
+                  }`}>
+                    {displayDate} {l.type === 'special' && '(特休)'} {l.status === 'pending' ? '(待核)' : ''}
                     <button onClick={() => setLeaveToDelete(l.date)} className="bg-white/50 hover:bg-red-500 hover:text-white text-gray-400 rounded-full p-0.5 transition-colors" title="移除此假單">
                       <X size={10} strokeWidth={3} />
                     </button>
@@ -658,14 +660,14 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
   if (role === 'manager') {
     Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
       leaves.filter(l => l.status === 'pending').forEach(l => {
-        pendingLeaves.push({ emp, date: l.date });
+        pendingLeaves.push({ emp, date: l.date, type: l.type });
       });
     });
   }
 
   const leavesOnSelectedDate = Object.entries(employeeLeaves).reduce((acc, [emp, leaves]) => {
     const leave = leaves.find(l => l.date === selectedHomeDate);
-    if (leave) acc.push({ emp, status: leave.status });
+    if (leave) acc.push({ emp, status: leave.status, type: leave.type });
     return acc;
   }, []);
 
@@ -741,7 +743,13 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
 
               let btnClass = 'bg-transparent text-gray-600 hover:bg-gray-50';
               if (isSelected) btnClass = 'bg-[#111] text-white shadow-lg transform scale-110 z-10';
-              else if (myLeaveToday) btnClass = myLeaveToday.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-green-50 text-green-600 border border-green-100';
+              else if (myLeaveToday) {
+                if (myLeaveToday.type === 'special') {
+                  btnClass = myLeaveToday.status === 'pending' ? 'bg-purple-100 text-purple-600 border border-purple-200' : 'bg-purple-50 text-purple-600 border border-purple-100';
+                } else {
+                  btnClass = myLeaveToday.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-green-50 text-green-600 border border-green-100';
+                }
+              }
               else if (hasShift) btnClass = 'bg-blue-50/50 text-blue-700 hover:bg-blue-100 font-bold';
               else if (isUnderstaffed) btnClass = 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100';
               else if (info.isOffDay) btnClass = 'bg-blue-50/30 text-blue-500 hover:bg-blue-100';
@@ -828,11 +836,17 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
             <div className="mb-6 bg-green-50/60 border border-green-100 p-3 rounded-2xl flex flex-wrap items-center gap-2 shadow-sm">
               <Briefcase size={16} className="text-green-600 shrink-0" />
               <span className="text-green-800 text-xs font-bold mr-1">今日排休：</span>
-              {leavesOnSelectedDate.map((l) => (
-                <span key={l.emp} className={`text-[10px] px-2 py-1 rounded-lg font-bold shadow-sm ${l.status === 'pending' ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-green-100 text-green-700 border border-green-200'}`}>
-                  {l.emp} {l.status === 'pending' ? '(待核)' : ''}
-                </span>
-              ))}
+              {leavesOnSelectedDate.map((l) => {
+                let badgeClass = l.status === 'pending' ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-green-100 text-green-700 border-green-200';
+                if (l.type === 'special') {
+                  badgeClass = l.status === 'pending' ? 'bg-purple-100 text-purple-500 border-purple-200' : 'bg-purple-100 text-purple-700 border-purple-200';
+                }
+                return (
+                  <span key={l.emp} className={`text-[10px] px-2 py-1 rounded-lg font-bold shadow-sm border ${badgeClass}`}>
+                    {l.emp} {l.type === 'special' && '(特休)'} {l.status === 'pending' ? '(待核)' : ''}
+                  </span>
+                );
+              })}
             </div>
           )}
 
@@ -928,7 +942,7 @@ function HomeScreen({ role, currentUser, onLogout, shifts, timeBlockDemands, reg
                       <span className={`text-[9px] px-1.5 py-0.5 rounded-md shadow-sm border ${getRoleStyles(userObj?.role || '')}`}>
                         {userObj?.role || '未知'}
                       </span>
-                      <span className="font-bold text-sm text-gray-800">{p.emp}</span>
+                      <span className="font-bold text-sm text-gray-800">{p.emp} {p.type === 'special' && <span className="text-purple-600 text-[10px] ml-0.5">(特休)</span>}</span>
                     </div>
                    <span className="text-xs text-gray-500 font-bold flex items-center gap-1"><CalendarIcon size={12} /> {p.date.split('/')[1]}/{p.date.split('/')[2]} 申請休假</span>
                   </div>
@@ -1229,7 +1243,7 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
   Object.entries(employeeLeaves).forEach(([emp, leaves]) => {
     leaves.filter(l => l.status === 'pending').forEach(l => {
       if (!pendingByDate[l.date]) pendingByDate[l.date] = [];
-      pendingByDate[l.date].push(emp);
+      pendingByDate[l.date].push({ emp, type: l.type });
     });
   });
 
@@ -1281,21 +1295,24 @@ function LeaveApprovalScreen({ onBack, employeeLeaves, onApproveLeave, onRejectL
                   </div>
 
                   <div className="flex gap-3 overflow-x-auto no-scrollbar pt-1 pb-2 ml-2 -mr-5 pr-5">
-                    {emps.map((emp) => {
-                      const userObj = registeredUsers.find(u => u.name === emp);
+                    {emps.map((pObj) => {
+                      const userObj = registeredUsers.find(u => u.name === pObj.emp);
                       return (
-                      <div key={emp} className="shrink-0 w-36 bg-gray-50 rounded-[1rem] p-3 border border-gray-100 flex flex-col gap-2 shadow-sm">
+                      <div key={pObj.emp} className="shrink-0 w-36 bg-gray-50 rounded-[1rem] p-3 border border-gray-100 flex flex-col gap-2 shadow-sm">
                         <div className="flex flex-col items-center justify-center gap-1.5">
                            <span className={`text-[9px] px-2 py-0.5 rounded-md shadow-sm border w-full text-center truncate ${getRoleStyles(userObj?.role || '')}`}>
                               {userObj?.role || '未綁定職位'}
                            </span>
-                           <span className="font-extrabold text-[14px] text-gray-800 text-center tracking-wide">{emp}</span>
+                           <span className="font-extrabold text-[14px] text-gray-800 text-center tracking-wide">
+                              {pObj.emp}
+                              {pObj.type === 'special' && <span className="text-purple-600 text-[10px] ml-0.5">(特休)</span>}
+                           </span>
                         </div>
                         <div className="flex gap-2 mt-1">
-                          <button onClick={() => onRejectLeave(emp, date)} className="flex-1 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center justify-center shadow-sm active:scale-95" title="駁回">
+                          <button onClick={() => onRejectLeave(pObj.emp, date)} className="flex-1 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors flex items-center justify-center shadow-sm active:scale-95" title="駁回">
                             <XCircle size={16} />
                           </button>
-                          <button onClick={() => onApproveLeave(emp, date)} className="flex-1 py-2 rounded-lg bg-[#111] text-white hover:bg-gray-800 transition-colors flex items-center justify-center shadow-sm active:scale-95" title="核准">
+                          <button onClick={() => onApproveLeave(pObj.emp, date)} className="flex-1 py-2 rounded-lg bg-[#111] text-white hover:bg-gray-800 transition-colors flex items-center justify-center shadow-sm active:scale-95" title="核准">
                             <CheckCircle size={16} />
                           </button>
                         </div>
@@ -1460,6 +1477,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
   }
   
   const [selectedLeaves, setSelectedLeaves] = useState(initialLeaves);
+  const [leaveMode, setLeaveMode] = useState('regular'); // 'regular' | 'special'
   const [leaveDate, setLeaveDate] = useState(initialDate);
   const [leaveReason, setLeaveReason] = useState(initialReason);
   
@@ -1538,7 +1556,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
     const bookedCount = othersLeaves[dateStr] || 0;
     const needsApproval = bookedCount >= APPROVAL_THRESHOLD;
 
-    const newLeave = { date: dateStr, status: needsApproval ? 'pending' : 'approved' };
+    const newLeave = { date: dateStr, status: needsApproval ? 'pending' : 'approved', type: leaveMode };
     setSelectedLeaves((prev) => [...prev, newLeave]);
     
     if (needsApproval) {
@@ -1610,14 +1628,19 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
           </div>
         )}
 
+        <div className="flex bg-gray-200/60 p-1.5 rounded-2xl mb-6">
+          <button onClick={() => setLeaveMode('regular')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all duration-300 ${leaveMode === 'regular' ? 'bg-white text-[#111] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>一般排休</button>
+          <button onClick={() => setLeaveMode('special')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all duration-300 ${leaveMode === 'special' ? 'bg-purple-500 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'}`}>特休申請</button>
+        </div>
+
         <div className="flex items-center justify-between mb-6 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex flex-col gap-3 text-xs font-bold text-gray-500">
-            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-[#111]"></div><span>確定休假</span></div>
-            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-orange-500"></div><span className="text-orange-600">待主管審核</span></div>
+          <div className="flex flex-col gap-2 text-xs font-bold text-gray-500">
+            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-[#111]"></div><span>一般排休</span></div>
+            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-purple-600"></div><span className="text-purple-600">特休</span></div>
           </div>
-          <div className="flex flex-col gap-3 text-xs font-bold text-gray-500">
-            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-red-50 border border-red-200"></div><span className="text-red-500">相同排休</span></div>
-            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-gray-50 border border-gray-200"></div><span>尚有名額</span></div>
+          <div className="flex flex-col gap-2 text-xs font-bold text-gray-500">
+             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-orange-500"></div><span className="text-orange-600">待主管核准</span></div>
+             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-red-50 border border-red-200"></div><span className="text-red-500">相同排休過多</span></div>
           </div>
         </div>
 
@@ -1647,7 +1670,11 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
 
               let btnClass = 'bg-gray-50 text-gray-600 border border-gray-100 hover:bg-gray-100';
               if (myLeave) {
-                btnClass = myLeave.status === 'pending' ? 'bg-orange-500 text-white shadow-md transform scale-105 z-10 font-bold border-transparent' : 'bg-[#111] text-white shadow-md transform scale-105 z-10 font-bold border-transparent';
+                if (myLeave.type === 'special') {
+                  btnClass = myLeave.status === 'pending' ? 'bg-purple-400 text-white shadow-md transform scale-105 z-10 font-bold border-transparent' : 'bg-purple-600 text-white shadow-md transform scale-105 z-10 font-bold border-transparent';
+                } else {
+                  btnClass = myLeave.status === 'pending' ? 'bg-orange-500 text-white shadow-md transform scale-105 z-10 font-bold border-transparent' : 'bg-[#111] text-white shadow-md transform scale-105 z-10 font-bold border-transparent';
+                }
               } else if (isFull) {
                 btnClass = 'bg-red-50 text-red-500 border border-red-100 font-bold';
               } else if (bookedCount > 0) {
@@ -1663,6 +1690,7 @@ function LeaveRequestScreen({ onBack, currentUser, employeeLeaves, employeeNotes
                 <button key={day} onClick={() => handleDayClick(day)} disabled={isSubmitted || isLocked} className={`relative w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-200 ${btnClass} ${lockedStyle}`}>
                   <span className={`text-[14px] font-bold ${(!myLeave && !isFull) ? (info.isHoliday ? 'text-blue-600' : (info.isWeekend ? 'text-blue-400' : 'text-gray-700')) : ''}`}>{day}</span>
                   
+                  {/* 升級：右上角小字標記 */}
                   {info.displayLabel && (
                     <span className={`absolute top-1 right-1.5 text-[9px] font-black tracking-tighter leading-none ${myLeave ? 'text-white/90' : (isFull ? 'text-red-500' : 'text-blue-600')}`}>
                       {info.displayLabel}
@@ -2359,7 +2387,11 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
 
               let btnClass = 'bg-gray-50 text-gray-600 hover:bg-gray-100';
               if (leaveInfo) {
-                 btnClass = leaveInfo.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-200' : 'bg-green-50 text-green-600 border border-green-200';
+                 if (leaveInfo.type === 'special') {
+                   btnClass = leaveInfo.status === 'pending' ? 'bg-purple-50 text-purple-500 border border-purple-200' : 'bg-purple-100 text-purple-700 border border-purple-300';
+                 } else {
+                   btnClass = leaveInfo.status === 'pending' ? 'bg-orange-50 text-orange-600 border border-orange-200' : 'bg-green-50 text-green-600 border border-green-200';
+                 }
               } else if (isShift) {
                  btnClass = 'bg-blue-50 text-blue-600 border border-blue-200 font-bold';
               } else if (info.isOffDay) {
@@ -2423,7 +2455,7 @@ function EmployeeProfileScreen({ currentUser, registeredUsers, employeeLeaves, s
                 <div>
                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">休假狀態</span>
                    <span className={`block text-lg font-bold ${selectedLeave.status === 'pending' ? 'text-orange-400' : 'text-green-400'}`}>
-                     {selectedLeave.status === 'pending' ? '待主管審核中' : '已核准休假'}
+                     {selectedLeave.status === 'pending' ? '待主管審核中' : '已核准休假'} {selectedLeave.type === 'special' && '(特休)'}
                    </span>
                 </div>
              </div>
